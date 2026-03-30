@@ -147,7 +147,7 @@ void loop() {
       digitalWrite(RED_LED, HIGH);
       digitalWrite(GREEN_LED, LOW);
 
-      beepConfirm();
+      if (!alarmActive) { beepConfirm(); }
 
     } else {
 
