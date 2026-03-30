@@ -156,7 +156,7 @@ void loop() {
       digitalWrite(RED_LED, LOW);
       digitalWrite(GREEN_LED, HIGH);
 
-      alarmActive = false; // 🔴 ВАЖЛИВО: вимикаємо сирену
+      alarmActive = false; 
 
       beepConfirm();
     }
@@ -173,7 +173,7 @@ void loop() {
     Serial.println("PANIC BUTTON PRESSED");
     publishEvent("panic_button", "pressed");
 
-    alarmActive = true; // 🔥
+    alarmActive = true; 
   }
 
   lastPanic = panicState;
@@ -189,7 +189,7 @@ void loop() {
       publishEvent("door", "open"); 
     } 
 
-    alarmActive = true; // 🔥
+    alarmActive = true; 
 
     lastDoor = doorState; 
   } 
@@ -197,7 +197,7 @@ void loop() {
   if (systemArmed && motionState == HIGH && lastMotion == LOW) { 
     Serial.println("MOTION DETECTED"); 
     publishEvent("motion", "detected"); 
-    alarmActive = true; // 🔥
+    alarmActive = true; 
     lastMotion = HIGH; 
   } 
 
@@ -218,7 +218,7 @@ void loop() {
       publishEvent("door_tamper", "triggered");
 
     }
-    alarmActive = true; // 🔥
+    alarmActive = true; 
     lastDoorTamper = doorTamperState;
   }
 
@@ -235,7 +235,7 @@ void loop() {
       publishEvent("motion_tamper", "triggered");
 
     }
-    alarmActive = true; // 🔥
+    alarmActive = true; 
     lastMotionTamper = motionTamperState;
   }
       
