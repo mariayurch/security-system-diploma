@@ -1,3 +1,4 @@
+#include "secrets.h"
 #include <WiFi.h> 
 #include <PubSubClient.h> 
 
@@ -11,8 +12,8 @@
 #define GREEN_LED 25
 #define BUZZER_PIN 21
 
-const char* ssid = "Apple"; 
-const char* password = "0502553777"; 
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 const char* mqtt_server = "broker.hivemq.com"; 
 
