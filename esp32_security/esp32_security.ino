@@ -1,9 +1,12 @@
 #include "secrets.h"
-#include <WiFi.h> 
-#include <PubSubClient.h> 
+#include <WiFi.h>
+#include <PubSubClient.h>
 
-#define DOOR_PIN 4 
-#define PIR_PIN 5 
+// ------------------------
+// Pins
+// ------------------------
+#define DOOR_PIN 4
+#define PIR_PIN 5
 #define DOOR_TAMPER_PIN 18
 #define MOTION_TAMPER_PIN 19
 #define PANIC_BUTTON_PIN 33
@@ -12,233 +15,460 @@
 #define GREEN_LED 25
 #define BUZZER_PIN 21
 
+// ------------------------
+// Wi‑Fi / MQTT
+// ------------------------
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
+const char* mqttServer = "broker.hivemq.com";
+const int mqttPort = 1883;
+const char* mqttClientId = "esp32_security_demo_01";
 
-const char* mqtt_server = "broker.hivemq.com"; 
+const char* eventsTopic = "home/security/events";
+const char* statusTopic = "home/security/status";
 
-WiFiClient espClient; 
-PubSubClient client(espClient); 
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-int lastDoor = HIGH; 
-int lastMotion = LOW; 
-int lastDoorTamper = HIGH;
-int lastMotionTamper = HIGH;
-int lastPanic = HIGH;
+// ------------------------
+// Device metadata
+// ------------------------
+const char* deviceId = "esp32-1";
+const char* zone = "room1";
+
+// ------------------------
+// Timing / debounce
+// ------------------------
+const unsigned long SENSOR_DEBOUNCE_MS = 80;
+const unsigned long BUTTON_DEBOUNCE_MS = 120;
+const unsigned long WIFI_RETRY_MS = 500;
+const unsigned long MQTT_RETRY_MS = 2000;
+const unsigned long HEARTBEAT_MS = 15000;
+
+// ------------------------
+// System state
+// ------------------------
 bool systemArmed = false;
-int lastArmButton = HIGH;
 bool alarmActive = false;
-int freq = 1500;
-bool up = true;
 
-void setup_wifi() 
-{ 
-  delay(10); 
-  Serial.println("Connecting to WiFi"); 
-  WiFi.begin(ssid, password); 
-  while (WiFi.status() != WL_CONNECTED) 
-  { 
-    delay(500); 
-    Serial.print("."); 
-  } 
-  Serial.println("WiFi connected"); 
-} 
+int stableDoorState;
+int lastRawDoorState;
+unsigned long lastDoorChangeMs = 0;
 
-void reconnect() 
-  { 
-    while (!client.connected()) { 
-      Serial.println("Connecting to MQTT..."); 
-      if (client.connect("esp32_security")) { 
-        Serial.println("MQTT connected"); 
-      } 
-      else { 
-        delay(2000); 
-      } 
-    } 
-  }
+int stableMotionState;
+int lastRawMotionState;
+unsigned long lastMotionChangeMs = 0;
 
-  void publishEvent(const char* sensor, const char* event) { 
+int stableDoorTamperState;
+int lastRawDoorTamperState;
+unsigned long lastDoorTamperChangeMs = 0;
 
-    char payload[200]; 
-    snprintf(payload, sizeof(payload), "{\"device\":\"esp32\",\"sensor\":\"%s\",\"event\":\"%s\",\"timestamp\":%lu}", sensor, event, millis() ); 
-    Serial.print("Publishing: "); 
-    Serial.println(payload); 
-    client.publish("home/security/events", payload); 
+int stableMotionTamperState;
+int lastRawMotionTamperState;
+unsigned long lastMotionTamperChangeMs = 0;
 
-} 
+int stableArmButtonState;
+int lastRawArmButtonState;
+unsigned long lastArmButtonChangeMs = 0;
 
-void beepConfirm() {
+int stablePanicButtonState;
+int lastRawPanicButtonState;
+unsigned long lastPanicButtonChangeMs = 0;
+
+// ------------------------
+// Siren state (non-blocking)
+// ------------------------
+int sirenFreq = 1500;
+bool sirenUp = true;
+unsigned long lastSirenStepMs = 0;
+const unsigned long SIREN_STEP_MS = 20;
+
+// ------------------------
+// Heartbeat / reconnect control
+// ------------------------
+unsigned long lastHeartbeatMs = 0;
+unsigned long lastMqttAttemptMs = 0;
+
+// ------------------------
+// Helpers
+// ------------------------
+void updateIndicators() {
+  digitalWrite(RED_LED, systemArmed ? HIGH : LOW);
+  digitalWrite(GREEN_LED, systemArmed ? LOW : HIGH);
+}
+
+void startAlarm() {
+  alarmActive = true;
+}
+
+void stopAlarm() {
+  alarmActive = false;
+  noTone(BUZZER_PIN);
+  sirenFreq = 1500;
+  sirenUp = true;
+}
+
+void beepOnce(int frequency, int durationMs) {
+  tone(BUZZER_PIN, frequency);
+  delay(durationMs);
+  noTone(BUZZER_PIN);
+}
+
+void beepArmConfirm() {
+  if (alarmActive) return;
+
   for (int i = 0; i < 2; i++) {
-    tone(BUZZER_PIN, 2000);
-    delay(100);
-    noTone(BUZZER_PIN);
-    delay(100);
+    beepOnce(2000, 90);
+    delay(80);
   }
 }
 
-void setup() { 
+void beepDisarmConfirm() {
+  beepOnce(1700, 120);
+  delay(80);
+  beepOnce(1400, 140);
+}
 
-  Serial.begin(115200); 
+void publishJson(const char* topic, const char* sensor, const char* event, bool retained = false) {
+  char payload[256];
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"%s\",\"event\":\"%s\",\"armed\":%s,\"ts\":%lu}",
+    deviceId,
+    zone,
+    sensor,
+    event,
+    systemArmed ? "true" : "false",
+    millis()
+  );
 
-  pinMode(DOOR_PIN, INPUT_PULLUP); 
-  pinMode(PIR_PIN, INPUT); 
+  Serial.print("Publishing to ");
+  Serial.print(topic);
+  Serial.print(": ");
+  Serial.println(payload);
 
+  client.publish(topic, payload, retained);
+}
+
+void publishEvent(const char* sensor, const char* event) {
+  publishJson(eventsTopic, sensor, event, false);
+}
+
+void publishStatus(const char* event) {
+  publishJson(statusTopic, "system", event, true);
+}
+
+void setupWifi() {
+  Serial.println("Connecting to Wi‑Fi...");
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(WIFI_RETRY_MS);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("Wi‑Fi connected");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void ensureWifi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.println("Wi‑Fi lost, reconnecting...");
+  WiFi.disconnect();
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(WIFI_RETRY_MS);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("Wi‑Fi restored");
+}
+
+bool connectMqtt() {
+
+  char willPayload[256];
+  snprintf(
+    willPayload,
+    sizeof(willPayload),
+    "{\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"system\",\"event\":\"connection_lost\",\"armed\":%s,\"ts\":%lu}",
+    deviceId,
+    zone,
+    systemArmed ? "true" : "false",
+    millis()
+  );
+
+  Serial.println("Connecting to MQTT...");
+
+  bool ok = client.connect(
+    mqttClientId,
+    statusTopic,
+    1,
+    true,
+    willPayload
+  );
+
+  if (ok) {
+    Serial.println("MQTT connected");
+    publishStatus("connection_restored");
+    publishStatus("online");
+    return true;
+  }
+
+  Serial.print("MQTT connect failed, rc=");
+  Serial.println(client.state());
+  return false;
+}
+
+void ensureMqtt() {
+  if (client.connected()) return;
+
+  unsigned long now = millis();
+  if (now - lastMqttAttemptMs < MQTT_RETRY_MS) return;
+  lastMqttAttemptMs = now;
+
+  ensureWifi();
+  connectMqtt();
+}
+
+void updateSiren() {
+  if (!alarmActive) return;
+
+  unsigned long now = millis();
+  if (now - lastSirenStepMs < SIREN_STEP_MS) return;
+  lastSirenStepMs = now;
+
+  tone(BUZZER_PIN, sirenFreq);
+
+  if (sirenUp) {
+    sirenFreq += 20;
+    if (sirenFreq >= 2500) sirenUp = false;
+  } else {
+    sirenFreq -= 20;
+    if (sirenFreq <= 1500) sirenUp = true;
+  }
+}
+
+void publishHeartbeat() {
+  unsigned long now = millis();
+  if (now - lastHeartbeatMs < HEARTBEAT_MS) return;
+  lastHeartbeatMs = now;
+
+  if (client.connected()) {
+    publishStatus("heartbeat");
+  }
+}
+
+void handleArmButtonPress() {
+  systemArmed = !systemArmed;
+  updateIndicators();
+
+  if (systemArmed) {
+    Serial.println("SYSTEM ARMED");
+    publishEvent("system", "armed");
+    beepArmConfirm();
+  } else {
+    Serial.println("SYSTEM DISARMED");
+    publishEvent("system", "disarmed");
+
+    bool wasAlarmActive = alarmActive;
+    stopAlarm();
+
+    if (wasAlarmActive) {
+      beepDisarmConfirm();
+    } else {
+      beepArmConfirm();
+    }
+  }
+}
+
+void handlePanicButtonPress() {
+  Serial.println("PANIC BUTTON PRESSED");
+  publishEvent("panic_button", "pressed");
+  startAlarm();
+}
+
+void handleDoorStableChange(int newState) {
+  if (!systemArmed) return;
+
+  if (newState == LOW) {
+    Serial.println("DOOR CLOSED");
+    publishEvent("door", "closed");
+  } else {
+    Serial.println("DOOR OPEN");
+    publishEvent("door", "open");
+  }
+
+  startAlarm();
+}
+
+void handleMotionStableChange(int newState) {
+  if (!systemArmed) return;
+
+  if (newState == HIGH) {
+    Serial.println("MOTION DETECTED");
+    publishEvent("motion", "detected");
+    startAlarm();
+  } else {
+    Serial.println("MOTION RESTORED");
+    publishEvent("motion", "restored");
+  }
+}
+
+void handleDoorTamperStableChange(int newState) {
+  if (!systemArmed) return;
+
+  if (newState == LOW) {
+    Serial.println("DOOR TAMPER RESTORED");
+    publishEvent("door_tamper", "restored");
+  } else {
+    Serial.println("DOOR TAMPER TRIGGERED");
+    publishEvent("door_tamper", "triggered");
+    startAlarm();
+  }
+}
+
+void handleMotionTamperStableChange(int newState) {
+  if (!systemArmed) return;
+
+  if (newState == LOW) {
+    Serial.println("MOTION TAMPER RESTORED");
+    publishEvent("motion_tamper", "restored");
+  } else {
+    Serial.println("MOTION TAMPER TRIGGERED");
+    publishEvent("motion_tamper", "triggered");
+    startAlarm();
+  }
+}
+
+void updateDebouncedInput(
+  int rawState,
+  int &lastRawState,
+  int &stableState,
+  unsigned long &lastChangeMs,
+  unsigned long debounceMs,
+  void (*onStableChange)(int)
+) {
+  unsigned long now = millis();
+
+  if (rawState != lastRawState) {
+    lastRawState = rawState;
+    lastChangeMs = now;
+  }
+
+  if ((now - lastChangeMs) >= debounceMs && rawState != stableState) {
+    stableState = rawState;
+    onStableChange(stableState);
+  }
+}
+
+void onArmButtonStableChange(int state) {
+  if (state == LOW) {
+    handleArmButtonPress();
+  }
+}
+
+void onPanicButtonStableChange(int state) {
+  if (state == LOW) {
+    handlePanicButtonPress();
+  }
+}
+
+void setup() {
+  client.setKeepAlive(5);
+
+  Serial.begin(115200);
+
+  pinMode(DOOR_PIN, INPUT_PULLUP);
+  pinMode(PIR_PIN, INPUT);
   pinMode(DOOR_TAMPER_PIN, INPUT_PULLUP);
   pinMode(MOTION_TAMPER_PIN, INPUT_PULLUP);
-
   pinMode(PANIC_BUTTON_PIN, INPUT_PULLUP);
   pinMode(ARM_BUTTON_PIN, INPUT_PULLUP);
 
   pinMode(RED_LED, OUTPUT);
   pinMode(GREEN_LED, OUTPUT);
-
   pinMode(BUZZER_PIN, OUTPUT);
 
-  // стартовий стан (система знята)
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(RED_LED, LOW);
+  updateIndicators();
 
-  setup_wifi(); 
+  stableDoorState = lastRawDoorState = digitalRead(DOOR_PIN);
+  stableMotionState = lastRawMotionState = digitalRead(PIR_PIN);
+  stableDoorTamperState = lastRawDoorTamperState = digitalRead(DOOR_TAMPER_PIN);
+  stableMotionTamperState = lastRawMotionTamperState = digitalRead(MOTION_TAMPER_PIN);
+  stableArmButtonState = lastRawArmButtonState = digitalRead(ARM_BUTTON_PIN);
+  stablePanicButtonState = lastRawPanicButtonState = digitalRead(PANIC_BUTTON_PIN);
 
-  client.setServer(mqtt_server, 1883); 
+  setupWifi();
+  client.setServer(mqttServer, mqttPort);
+  connectMqtt();
+}
 
-} 
+void loop() {
+  ensureMqtt();
+  client.loop();
 
-void loop() { 
+  updateSiren();
+  publishHeartbeat();
 
-  if (!client.connected()) { 
-    reconnect(); 
-  } 
+  updateDebouncedInput(
+    digitalRead(ARM_BUTTON_PIN),
+    lastRawArmButtonState,
+    stableArmButtonState,
+    lastArmButtonChangeMs,
+    BUTTON_DEBOUNCE_MS,
+    onArmButtonStableChange
+  );
 
-  client.loop(); 
+  updateDebouncedInput(
+    digitalRead(PANIC_BUTTON_PIN),
+    lastRawPanicButtonState,
+    stablePanicButtonState,
+    lastPanicButtonChangeMs,
+    BUTTON_DEBOUNCE_MS,
+    onPanicButtonStableChange
+  );
 
-  int doorState = digitalRead(DOOR_PIN); 
-  int motionState = digitalRead(PIR_PIN);
+  updateDebouncedInput(
+    digitalRead(DOOR_PIN),
+    lastRawDoorState,
+    stableDoorState,
+    lastDoorChangeMs,
+    SENSOR_DEBOUNCE_MS,
+    handleDoorStableChange
+  );
 
-  int doorTamperState = digitalRead(DOOR_TAMPER_PIN);
-  int motionTamperState = digitalRead(MOTION_TAMPER_PIN);
+  updateDebouncedInput(
+    digitalRead(PIR_PIN),
+    lastRawMotionState,
+    stableMotionState,
+    lastMotionChangeMs,
+    SENSOR_DEBOUNCE_MS,
+    handleMotionStableChange
+  );
 
-  int armButtonState = digitalRead(ARM_BUTTON_PIN);
+  updateDebouncedInput(
+    digitalRead(DOOR_TAMPER_PIN),
+    lastRawDoorTamperState,
+    stableDoorTamperState,
+    lastDoorTamperChangeMs,
+    SENSOR_DEBOUNCE_MS,
+    handleDoorTamperStableChange
+  );
 
-  if (alarmActive) {
+  updateDebouncedInput(
+    digitalRead(MOTION_TAMPER_PIN),
+    lastRawMotionTamperState,
+    stableMotionTamperState,
+    lastMotionTamperChangeMs,
+    SENSOR_DEBOUNCE_MS,
+    handleMotionTamperStableChange
+  );
 
-    tone(BUZZER_PIN, freq);
-
-    if (up) {
-      freq += 20;
-      if (freq > 2500) up = false;
-    } else {
-      freq -= 20;
-      if (freq < 1500) up = true;
-    }
-
-    delay(20);
-  }
-
-  if (armButtonState == LOW && lastArmButton == HIGH) {
-
-    systemArmed = !systemArmed;
-
-    if (systemArmed) {
-
-      Serial.println("SYSTEM ARMED");
-      publishEvent("system", "armed");
-
-      digitalWrite(RED_LED, HIGH);
-      digitalWrite(GREEN_LED, LOW);
-
-      if (!alarmActive) { beepConfirm(); }
-
-    } else {
-
-      Serial.println("SYSTEM DISARMED");
-      publishEvent("system", "disarmed");
-
-      digitalWrite(RED_LED, LOW);
-      digitalWrite(GREEN_LED, HIGH);
-
-      alarmActive = false; 
-
-      beepConfirm();
-    }
-
-    delay(300);
-  }
-
-  lastArmButton = armButtonState;
-
-  int panicState = digitalRead(PANIC_BUTTON_PIN);
-
-  if (panicState == LOW && lastPanic == HIGH) {
-
-    Serial.println("PANIC BUTTON PRESSED");
-    publishEvent("panic_button", "pressed");
-
-    alarmActive = true; 
-  }
-
-  lastPanic = panicState;
-
-  if (systemArmed && doorState != lastDoor) { 
-
-    if (doorState == LOW) { 
-      Serial.println("DOOR CLOSED"); 
-      publishEvent("door", "closed"); 
-    } 
-    else { 
-      Serial.println("DOOR OPEN"); 
-      publishEvent("door", "open"); 
-    } 
-
-    alarmActive = true; 
-
-    lastDoor = doorState; 
-  } 
-
-  if (systemArmed && motionState == HIGH && lastMotion == LOW) { 
-    Serial.println("MOTION DETECTED"); 
-    publishEvent("motion", "detected"); 
-    alarmActive = true; 
-    lastMotion = HIGH; 
-  } 
-
-  if (motionState == LOW) { 
-    lastMotion = LOW; 
-  } 
-
-  if (systemArmed && doorTamperState != lastDoorTamper) {
-
-    if (doorTamperState == LOW) {
-
-      Serial.println("DOOR TAMPER RESTORED");
-      publishEvent("door_tamper", "restored");
-
-    } else {
-
-      Serial.println("DOOR TAMPER TRIGGERED");
-      publishEvent("door_tamper", "triggered");
-
-    }
-    alarmActive = true; 
-    lastDoorTamper = doorTamperState;
-  }
-
-  if (systemArmed && motionTamperState != lastMotionTamper) {
-
-    if (motionTamperState == LOW) {
-
-      Serial.println("MOTION TAMPER RESTORED");
-      publishEvent("motion_tamper", "restored");
-
-    } else {
-
-      Serial.println("MOTION TAMPER TRIGGERED");
-      publishEvent("motion_tamper", "triggered");
-
-    }
-    alarmActive = true; 
-    lastMotionTamper = motionTamperState;
-  }
-      
-  delay(50); 
+  delay(5);
 }
