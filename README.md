@@ -47,7 +47,7 @@ ESP32 → MQTT → Backend → Telegram bot
 ## Project structure
 
 ```text
-esp32_security/
+esp32/
 ├── include/
 │   ├── Config.h
 │   ├── Events.h
