@@ -50,6 +50,7 @@ const unsigned long HEARTBEAT_MS = 15000;
 // ------------------------
 bool systemArmed = false;
 bool alarmActive = false;
+unsigned long eventCounter = 0;
 
 int stableDoorState;
 int lastRawDoorState;
@@ -129,19 +130,28 @@ void beepDisarmConfirm() {
   beepOnce(1400, 140);
 }
 
-void publishJson(const char* topic, const char* sensor, const char* event, bool retained = false) {
-  char payload[256];
+void buildJsonPayload(char* payload, size_t payloadSize, const char* sensor, const char* event) {
+  long rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+  unsigned long currentEventId = ++eventCounter;
+
   snprintf(
     payload,
-    sizeof(payload),
-    "{\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"%s\",\"event\":\"%s\",\"armed\":%s,\"ts\":%lu}",
+    payloadSize,
+    "{\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"%s\",\"event\":\"%s\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
+    currentEventId,
     deviceId,
     zone,
     sensor,
     event,
     systemArmed ? "true" : "false",
+    rssi,
     millis()
   );
+}
+
+void publishJson(const char* topic, const char* sensor, const char* event, bool retained = false) {
+  char payload[320];
+  buildJsonPayload(payload, sizeof(payload), sensor, event);
 
   Serial.print("Publishing to ");
   Serial.print(topic);
@@ -191,15 +201,19 @@ void ensureWifi() {
 }
 
 bool connectMqtt() {
+  char willPayload[320];
+  long rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+  unsigned long currentEventId = ++eventCounter;
 
-  char willPayload[256];
   snprintf(
     willPayload,
     sizeof(willPayload),
-    "{\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"system\",\"event\":\"connection_lost\",\"armed\":%s,\"ts\":%lu}",
+    "{\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"system\",\"event\":\"connection_lost\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
+    currentEventId,
     deviceId,
     zone,
     systemArmed ? "true" : "false",
+    rssi,
     millis()
   );
 
@@ -215,7 +229,8 @@ bool connectMqtt() {
 
   if (ok) {
     Serial.println("MQTT connected");
-    publishStatus("connection_restored");
+    publishEvent("system", "boot");
+    publishEvent("system", "connection_restored");
     publishStatus("online");
     return true;
   }
@@ -260,7 +275,7 @@ void publishHeartbeat() {
   lastHeartbeatMs = now;
 
   if (client.connected()) {
-    publishStatus("heartbeat");
+    publishEvent("system", "heartbeat");
   }
 }
 
@@ -380,8 +395,6 @@ void onPanicButtonStableChange(int state) {
 }
 
 void setup() {
-  client.setKeepAlive(5);
-
   Serial.begin(115200);
 
   pinMode(DOOR_PIN, INPUT_PULLUP);
@@ -406,6 +419,7 @@ void setup() {
 
   setupWifi();
   client.setServer(mqttServer, mqttPort);
+  client.setKeepAlive(5);
   connectMqtt();
 }
 
