@@ -9,14 +9,17 @@ public class MqttListenerService : BackgroundService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<MqttListenerService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
     private IMqttClient? _client;
 
     public MqttListenerService(
         IConfiguration configuration,
-        ILogger<MqttListenerService> logger)
+        ILogger<MqttListenerService> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _configuration = configuration;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -24,12 +27,11 @@ public class MqttListenerService : BackgroundService
         var factory = new MqttClientFactory();
         _client = factory.CreateMqttClient();
 
-        _client.ApplicationMessageReceivedAsync += e =>
+        _client.ApplicationMessageReceivedAsync += async e =>
         {
             try
             {
-                var payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);              
-                
+                var payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
                 _logger.LogInformation("MQTT raw payload: {Payload}", payload);
 
                 var dto = JsonSerializer.Deserialize<EspEventDto>(payload, new JsonSerializerOptions
@@ -40,24 +42,17 @@ public class MqttListenerService : BackgroundService
                 if (dto is null)
                 {
                     _logger.LogWarning("Failed to deserialize payload");
-                    return Task.CompletedTask;
+                    return;
                 }
 
-                _logger.LogInformation(
-                    "Event received -> device={DeviceId}, sensor={Sensor}, event={Event}, armed={Armed}, rssi={Rssi}, ts={Ts}",
-                    dto.DeviceId,
-                    dto.Sensor,
-                    dto.Event,
-                    dto.Armed,
-                    dto.Rssi,
-                    dto.Ts);
+                using var scope = _scopeFactory.CreateScope();
+                var ingestionService = scope.ServiceProvider.GetRequiredService<EventIngestionService>();
 
-                return Task.CompletedTask;
+                await ingestionService.SaveEventAsync(dto, stoppingToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while processing MQTT message");
-                return Task.CompletedTask;
             }
         };
 
@@ -75,7 +70,7 @@ public class MqttListenerService : BackgroundService
         {
             try
             {
-                if (!_client.IsConnected)
+                if (_client is not null && !_client.IsConnected)
                 {
                     _logger.LogInformation("Connecting to MQTT broker...");
                     await _client.ConnectAsync(options, stoppingToken);
