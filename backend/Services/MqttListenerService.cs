@@ -32,6 +32,9 @@ public class MqttListenerService : BackgroundService
             try
             {
                 var payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+                var sourceTopic = e.ApplicationMessage.Topic;
+
+                _logger.LogInformation("MQTT message received from topic: {Topic}", sourceTopic);
                 _logger.LogInformation("MQTT raw payload: {Payload}", payload);
 
                 var dto = JsonSerializer.Deserialize<EspEventDto>(payload, new JsonSerializerOptions
@@ -58,7 +61,7 @@ public class MqttListenerService : BackgroundService
 
         var host = _configuration["Mqtt:Host"]!;
         var port = int.Parse(_configuration["Mqtt:Port"]!);
-        var topic = _configuration["Mqtt:Topic"]!;
+        var topics = _configuration.GetSection("Mqtt:Topics").Get<string[]>() ?? Array.Empty<string>();
         var clientId = _configuration["Mqtt:ClientId"]!;
 
         var options = new MqttClientOptionsBuilder()
@@ -76,8 +79,11 @@ public class MqttListenerService : BackgroundService
                     await _client.ConnectAsync(options, stoppingToken);
                     _logger.LogInformation("Connected to MQTT broker");
 
-                    await _client.SubscribeAsync(topic, cancellationToken: stoppingToken);
-                    _logger.LogInformation("Subscribed to topic: {Topic}", topic);
+                    foreach (var topic in topics)
+                    {
+                        await _client.SubscribeAsync(topic, cancellationToken: stoppingToken);
+                        _logger.LogInformation("Subscribed to topic: {Topic}", topic);
+                    }
                 }
 
                 await Task.Delay(3000, stoppingToken);
