@@ -2,6 +2,7 @@ namespace backend.Dtos;
 
 public class EspEventDto
 {
+    public string BootId { get; set; } = default!;
     public long EventId { get; set; }
     public string DeviceId { get; set; } = default!;
     public string Zone { get; set; } = default!;

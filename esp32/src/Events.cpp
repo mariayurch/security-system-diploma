@@ -12,7 +12,8 @@ void buildJsonPayload(char* payload, size_t payloadSize, const char* sensor, con
   snprintf(
     payload,
     payloadSize,
-    "{\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"%s\",\"event\":\"%s\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
+    "{\"bootId\":\"%s\",\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"%s\",\"event\":\"%s\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
+    systemState.bootId.c_str(),
     currentEventId,
     DEVICE_ID,
     DEVICE_ZONE,
@@ -25,7 +26,7 @@ void buildJsonPayload(char* payload, size_t payloadSize, const char* sensor, con
 }
 
 static void publishJson(const char* topic, const char* sensor, const char* event, bool retained) {
-  char payload[320];
+  char payload[512];
   buildJsonPayload(payload, sizeof(payload), sensor, event);
 
   Serial.print("Publishing to ");

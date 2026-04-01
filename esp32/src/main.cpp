@@ -13,6 +13,11 @@
 void setup() {
   Serial.begin(115200);
 
+  systemState.bootId = String((uint32_t)esp_random(), HEX) + String((uint32_t)esp_random(), HEX);
+
+  Serial.print("bootId: ");
+  Serial.println(systemState.bootId);
+
   configureInputs();
   initializeInputStates();
 

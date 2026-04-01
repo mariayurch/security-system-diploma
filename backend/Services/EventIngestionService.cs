@@ -25,6 +25,7 @@ public class EventIngestionService
     {
         var entity = new SecurityEvent
         {
+            BootId = dto.BootId,
             EventId = dto.EventId,
             DeviceId = dto.DeviceId,
             Zone = dto.Zone,

@@ -23,8 +23,9 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Zone).HasMaxLength(100);
             entity.Property(e => e.Sensor).HasMaxLength(100);
             entity.Property(e => e.Event).HasMaxLength(100);
-
-            entity.HasIndex(e => new { e.DeviceId, e.EventId }).IsUnique();
+            entity.Property(e => e.BootId).HasMaxLength(100);
+            
+            entity.HasIndex(e => new { e.DeviceId, e.BootId, e.EventId }).IsUnique();
         });
 
         modelBuilder.Entity<Incident>(entity =>

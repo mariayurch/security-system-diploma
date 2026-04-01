@@ -24,6 +24,7 @@ struct SystemState {
   unsigned long eventCounter = 0;
   unsigned long lastHeartbeatMs = 0;
   unsigned long lastMqttAttemptMs = 0;
+  String bootId = "";
 };
 
 struct SirenState {
