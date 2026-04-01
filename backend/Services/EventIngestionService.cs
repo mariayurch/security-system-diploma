@@ -8,11 +8,16 @@ namespace backend.Services;
 public class EventIngestionService
 {
     private readonly AppDbContext _db;
+    private readonly IncidentService _incidentService;
     private readonly ILogger<EventIngestionService> _logger;
 
-    public EventIngestionService(AppDbContext db, ILogger<EventIngestionService> logger)
+    public EventIngestionService(
+        AppDbContext db,
+        IncidentService incidentService,
+        ILogger<EventIngestionService> logger)
     {
         _db = db;
+        _incidentService = incidentService;
         _logger = logger;
     }
 
@@ -43,6 +48,8 @@ public class EventIngestionService
                 entity.Sensor,
                 entity.Event,
                 entity.EventId);
+
+            await _incidentService.ProcessEventAsync(entity, cancellationToken);
 
             return entity;
         }

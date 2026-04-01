@@ -12,6 +12,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<EventIngestionService>();
+builder.Services.AddScoped<IncidentService>();
 builder.Services.AddHostedService<MqttListenerService>();
 
 var app = builder.Build();
