@@ -54,12 +54,12 @@ void publishHeartbeatIfDue() {
   systemState.lastHeartbeatMs = now;
 
   if (mqttClient.connected()) {
-    publishEvent("system", "heartbeat");
+    publishStatus("heartbeat");
   }
 }
 
 void publishBootSequence() {
   publishEvent("system", "boot");
-  publishEvent("system", "connection_restored");
+  publishStatus("connection_restored");
   publishStatus("online");
 }

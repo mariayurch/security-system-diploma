@@ -63,7 +63,7 @@ bool connectMqtt() {
 
   const bool connected = mqttClient.connect(
     MQTT_CLIENT_ID,
-    EVENTS_TOPIC,
+    STATUS_TOPIC,
     1,
     false,
     willPayload
