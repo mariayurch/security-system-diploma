@@ -1,6 +1,6 @@
 .pio/
 .vscode/
-include/secrets.h
+**/secrets.h
 *.log
 *.tmp
 .DS_Store
