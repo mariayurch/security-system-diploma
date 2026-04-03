@@ -40,10 +40,6 @@ void setupWifi() {
 
 void ensureWifi() {
 
-  if (systemState.wifiTestDisconnected) {
-    return;
-  }
-
   if (WiFi.status() == WL_CONNECTED) {
     return;
   }
