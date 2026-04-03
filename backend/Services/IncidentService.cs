@@ -47,7 +47,7 @@ public class IncidentService
 
         if (IsConnectionLostTrigger(securityEvent))
         {
-            await TryConfirmSabotageFromConnectionLostAsync(securityEvent, cancellationToken);
+            await TryCreateOrConfirmSabotageFromConnectionLostAsync(securityEvent, cancellationToken);
             return;
         }
     }
@@ -400,6 +400,34 @@ public class IncidentService
             return;
         }
 
+        var recentOtherTamper = await _db.SecurityEvents
+            .Where(e =>
+                e.DeviceId == tamperEvent.DeviceId &&
+                e.Zone == tamperEvent.Zone &&
+                e.Armed &&
+                (e.Sensor == "door_tamper" || e.Sensor == "motion_tamper") &&
+                e.Event == "triggered" &&
+                e.SensorId != tamperEvent.SensorId &&
+                e.ReceivedAtUtc >= windowStart &&
+                e.ReceivedAtUtc <= tamperEvent.ReceivedAtUtc)
+            .OrderByDescending(e => e.ReceivedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (recentOtherTamper is not null)
+        {
+            await CreateConfirmedSabotageIncidentAsync(
+                zone: tamperEvent.Zone,
+                startedAtUtc: tamperEvent.ReceivedAtUtc < recentOtherTamper.ReceivedAtUtc
+                    ? tamperEvent.ReceivedAtUtc
+                    : recentOtherTamper.ReceivedAtUtc,
+                explanation:
+                    $"Confirmed sabotage: tamper triggers from {recentOtherTamper.SensorId} and {tamperEvent.SensorId} were detected within 30 seconds while system was armed.",
+                relatedEvents: new[] { recentOtherTamper, tamperEvent },
+                cancellationToken: cancellationToken);
+
+            return;
+        }
+
         var existingOpenSabotage = await _db.Incidents
             .Where(i =>
                 i.IncidentType == IncidentType.Sabotage &&
@@ -442,7 +470,7 @@ public class IncidentService
             incident.Id);
     }
 
-    private async Task TryConfirmSabotageFromConnectionLostAsync(SecurityEvent connectionLostEvent, CancellationToken cancellationToken)
+    private async Task TryCreateOrConfirmSabotageFromConnectionLostAsync(SecurityEvent connectionLostEvent, CancellationToken cancellationToken)
     {
         var windowStart = connectionLostEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
 
@@ -477,7 +505,7 @@ public class IncidentService
             await _db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
-                "Sabotage confirmed -> zone={Zone}, incidentId={IncidentId}",
+                "Sabotage confirmed from connection_lost -> zone={Zone}, incidentId={IncidentId}",
                 suspectedSabotage.Zone,
                 suspectedSabotage.Id);
 
@@ -511,9 +539,46 @@ public class IncidentService
             return;
         }
 
+        var existingOpenSabotage = await _db.Incidents
+            .Where(i =>
+                i.IncidentType == IncidentType.Sabotage &&
+                i.Zone == connectionLostEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.StartedAtUtc >= windowStart &&
+                i.StartedAtUtc <= connectionLostEvent.ReceivedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingOpenSabotage is not null)
+        {
+            _logger.LogInformation(
+                "Open sabotage already exists for zone {Zone}, skipping new connection_lost-based sabotage",
+                connectionLostEvent.Zone);
+            return;
+        }
+
+        var incident = new Incident
+        {
+            IncidentType = IncidentType.Sabotage,
+            Status = IncidentStatus.Open,
+            Confidence = IncidentConfidence.Suspected,
+            Zone = connectionLostEvent.Zone,
+            StartedAtUtc = connectionLostEvent.ReceivedAtUtc,
+            Explanation =
+                $"Suspected sabotage: connection_lost detected while system was armed."
+        };
+
+        incident.IncidentEventLinks.Add(new IncidentEventLink
+        {
+            SecurityEvent = connectionLostEvent
+        });
+
+        _db.Incidents.Add(incident);
+        await _db.SaveChangesAsync(cancellationToken);
+
         _logger.LogInformation(
-            "No recent tamper trigger found for connection_lost in zone {Zone}; sabotage not created",
-            connectionLostEvent.Zone);
+            "Suspected sabotage created from connection_lost -> zone={Zone}, incidentId={IncidentId}",
+            incident.Zone,
+            incident.Id);
     }
 
     private async Task CreateConfirmedSabotageIncidentAsync(
