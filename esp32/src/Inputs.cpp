@@ -65,10 +65,7 @@ static void handleMotionStableChange(int newState) {
     Serial.println("MOTION DETECTED");
     publishEvent("motion", MOTION_SENSOR_ID, "detected");
     startAlarm();
-  } else {
-    Serial.println("MOTION RESTORED");
-    publishEvent("motion", MOTION_SENSOR_ID, "restored");
-  }
+  } 
 }
 
 static void handleDoorTamperStableChange(int newState) {
