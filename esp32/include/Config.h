@@ -15,6 +15,9 @@ constexpr int RED_LED_PIN = 27;
 constexpr int GREEN_LED_PIN = 25;
 constexpr int BUZZER_PIN = 21;
 
+constexpr uint8_t WIFI_TEST_BUTTON_PIN = 32;
+constexpr unsigned long WIFI_TEST_BUTTON_DEBOUNCE_MS = 50;
+
 // ------------------------
 // Wi‑Fi / MQTT
 // ------------------------
