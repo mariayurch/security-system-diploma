@@ -16,5 +16,3 @@ extern DebouncedInput doorInput;
 extern DebouncedInput motionInput;
 extern DebouncedInput doorTamperInput;
 extern DebouncedInput motionTamperInput;
-
-extern DebouncedInput wifiTestButtonInput;

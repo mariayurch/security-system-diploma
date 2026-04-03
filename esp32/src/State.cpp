@@ -13,5 +13,3 @@ DebouncedInput doorInput = {DOOR_PIN, SENSOR_DEBOUNCE_MS, HIGH, HIGH, 0, nullptr
 DebouncedInput motionInput = {PIR_PIN, SENSOR_DEBOUNCE_MS, LOW, LOW, 0, nullptr};
 DebouncedInput doorTamperInput = {DOOR_TAMPER_PIN, SENSOR_DEBOUNCE_MS, HIGH, HIGH, 0, nullptr};
 DebouncedInput motionTamperInput = {MOTION_TAMPER_PIN, SENSOR_DEBOUNCE_MS, HIGH, HIGH, 0, nullptr};
-
-DebouncedInput wifiTestButtonInput;

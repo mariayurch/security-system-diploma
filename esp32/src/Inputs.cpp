@@ -4,31 +4,6 @@
 #include "Events.h"
 #include "Siren.h"
 #include "State.h"
-#include "WifiMqtt.h"
-
-static void onWifiTestButtonStableChange(int state) {
-  Serial.print("WIFI TEST BUTTON state changed: ");
-  Serial.println(state);
-
-  if (state != LOW) {
-    return;
-  }
-
-  if (!systemState.wifiTestDisconnected) {
-    Serial.println("TEST: disconnecting Wi-Fi on demand...");
-    systemState.wifiTestDisconnected = true;
-
-    mqttClient.disconnect();
-    WiFi.disconnect(true, true);
-    return;
-  }
-
-  Serial.println("TEST: reconnecting Wi-Fi on demand...");
-  systemState.wifiTestDisconnected = false;
-
-  setupWifi();
-  connectMqtt();
-}
 
 static void updateIndicators() {
   digitalWrite(RED_LED_PIN, systemState.armed ? HIGH : LOW);
@@ -159,8 +134,6 @@ static void configureCallbacks() {
   motionInput.onStableChange = handleMotionStableChange;
   doorTamperInput.onStableChange = handleDoorTamperStableChange;
   motionTamperInput.onStableChange = handleMotionTamperStableChange;
-
-  wifiTestButtonInput.onStableChange = onWifiTestButtonStableChange;
 }
 
 void configureInputs() {
@@ -175,8 +148,6 @@ void configureInputs() {
   pinMode(GREEN_LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  pinMode(WIFI_TEST_BUTTON_PIN, INPUT_PULLUP);
-
   configureCallbacks();
   updateIndicators();
 }
@@ -188,13 +159,6 @@ void initializeInputStates() {
   motionInput.stableState = motionInput.lastRawState = digitalRead(motionInput.pin);
   doorTamperInput.stableState = doorTamperInput.lastRawState = digitalRead(doorTamperInput.pin);
   motionTamperInput.stableState = motionTamperInput.lastRawState = digitalRead(motionTamperInput.pin);
-
- wifiTestButtonInput.pin = WIFI_TEST_BUTTON_PIN;
-  wifiTestButtonInput.debounceMs = WIFI_TEST_BUTTON_DEBOUNCE_MS;
-  wifiTestButtonInput.stableState = digitalRead(wifiTestButtonInput.pin);
-  wifiTestButtonInput.lastRawState = digitalRead(wifiTestButtonInput.pin);
-  wifiTestButtonInput.lastChangeMs = millis();
-  wifiTestButtonInput.onStableChange = onWifiTestButtonStableChange;
 }
 
 void updateInputs() {
@@ -204,6 +168,4 @@ void updateInputs() {
   updateDebouncedInput(motionInput);
   updateDebouncedInput(doorTamperInput);
   updateDebouncedInput(motionTamperInput);
-
-  updateDebouncedInput(wifiTestButtonInput);
 }

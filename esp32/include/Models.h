@@ -25,8 +25,6 @@ struct SystemState {
   unsigned long lastHeartbeatMs = 0;
   unsigned long lastMqttAttemptMs = 0;
   String bootId = "";
-
-  bool wifiTestDisconnected = false;
 };
 
 struct SirenState {
