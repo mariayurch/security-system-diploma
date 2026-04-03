@@ -133,7 +133,11 @@ public class IncidentService
 
     private async Task TryCreateOrConfirmIntrusionFromPerimeterAsync(SecurityEvent perimeterEvent, CancellationToken cancellationToken)
     {
-        var windowStart = perimeterEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
+        var windowStart = await GetCorrelationWindowStartAsync(
+            perimeterEvent.DeviceId,
+            perimeterEvent.Zone,
+            perimeterEvent.ReceivedAtUtc,
+            cancellationToken);
 
         var recentMotion = await _db.SecurityEvents
             .Where(e =>
@@ -207,7 +211,11 @@ public class IncidentService
 
     private async Task TryCreateOrConfirmIntrusionFromMotionAsync(SecurityEvent motionEvent, CancellationToken cancellationToken)
     {
-        var windowStart = motionEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
+        var windowStart = await GetCorrelationWindowStartAsync(
+            motionEvent.DeviceId,
+            motionEvent.Zone,
+            motionEvent.ReceivedAtUtc,
+            cancellationToken);
 
         var suspectedIntrusion = await _db.Incidents
             .Include(i => i.IncidentEventLinks)
@@ -369,9 +377,53 @@ public class IncidentService
             incident.Id);
     }
 
+    private async Task<DateTime?> GetLastArmedAtUtcAsync(
+        string deviceId,
+        string zone,
+        DateTime beforeUtc,
+        CancellationToken cancellationToken)
+    {
+        return await _db.SecurityEvents
+            .Where(e =>
+                e.DeviceId == deviceId &&
+                e.Zone == zone &&
+                e.Sensor == "system" &&
+                e.Event == "armed" &&
+                e.ReceivedAtUtc <= beforeUtc)
+            .OrderByDescending(e => e.ReceivedAtUtc)
+            .Select(e => (DateTime?)e.ReceivedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<DateTime> GetCorrelationWindowStartAsync(
+        string deviceId,
+        string zone,
+        DateTime eventTimeUtc,
+        CancellationToken cancellationToken)
+    {
+        var timeWindowStart = eventTimeUtc - IntrusionConfirmationWindow;
+
+        var lastArmedAtUtc = await GetLastArmedAtUtcAsync(
+            deviceId,
+            zone,
+            eventTimeUtc,
+            cancellationToken);
+
+        if (lastArmedAtUtc.HasValue && lastArmedAtUtc.Value > timeWindowStart)
+        {
+            return lastArmedAtUtc.Value;
+        }
+
+        return timeWindowStart;
+    }
+
     private async Task TryCreateOrConfirmSabotageFromTamperAsync(SecurityEvent tamperEvent, CancellationToken cancellationToken)
     {
-        var windowStart = tamperEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
+        var windowStart = await GetCorrelationWindowStartAsync(
+            tamperEvent.DeviceId,
+            tamperEvent.Zone,
+            tamperEvent.ReceivedAtUtc,
+            cancellationToken);
 
         var recentConnectionLost = await _db.SecurityEvents
             .Where(e =>
@@ -473,7 +525,11 @@ public class IncidentService
 
     private async Task TryCreateOrConfirmSabotageFromConnectionLostAsync(SecurityEvent connectionLostEvent, CancellationToken cancellationToken)
     {
-        var windowStart = connectionLostEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
+        var windowStart = await GetCorrelationWindowStartAsync(
+            connectionLostEvent.DeviceId,
+            connectionLostEvent.Zone,
+            connectionLostEvent.ReceivedAtUtc,
+            cancellationToken);
 
         var openSabotage = await _db.Incidents
             .Include(i => i.IncidentEventLinks)
