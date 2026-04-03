@@ -435,6 +435,7 @@ public class IncidentService
                 i.Status == IncidentStatus.Open &&
                 i.StartedAtUtc >= windowStart &&
                 i.StartedAtUtc <= tamperEvent.ReceivedAtUtc)
+            .OrderByDescending(i => i.StartedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (existingOpenSabotage is not null)
@@ -474,40 +475,39 @@ public class IncidentService
     {
         var windowStart = connectionLostEvent.ReceivedAtUtc - IntrusionConfirmationWindow;
 
-        var suspectedSabotage = await _db.Incidents
+        var openSabotage = await _db.Incidents
             .Include(i => i.IncidentEventLinks)
             .ThenInclude(link => link.SecurityEvent)
             .Where(i =>
                 i.IncidentType == IncidentType.Sabotage &&
                 i.Zone == connectionLostEvent.Zone &&
                 i.Status == IncidentStatus.Open &&
-                i.Confidence == IncidentConfidence.Suspected &&
                 i.StartedAtUtc >= windowStart &&
                 i.StartedAtUtc <= connectionLostEvent.ReceivedAtUtc)
             .OrderByDescending(i => i.StartedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (suspectedSabotage is not null)
+        if (openSabotage is not null)
         {
-            var alreadyLinked = suspectedSabotage.IncidentEventLinks.Any(link => link.SecurityEventId == connectionLostEvent.Id);
+            var alreadyLinked = openSabotage.IncidentEventLinks.Any(link => link.SecurityEventId == connectionLostEvent.Id);
             if (!alreadyLinked)
             {
-                suspectedSabotage.IncidentEventLinks.Add(new IncidentEventLink
+                openSabotage.IncidentEventLinks.Add(new IncidentEventLink
                 {
                     SecurityEventId = connectionLostEvent.Id
                 });
             }
 
-            suspectedSabotage.Confidence = IncidentConfidence.Confirmed;
-            suspectedSabotage.Explanation =
-                $"{suspectedSabotage.Explanation} Confirmation: connection_lost detected within 30 seconds.";
+            openSabotage.Confidence = IncidentConfidence.Confirmed;
+            openSabotage.Explanation =
+                $"{openSabotage.Explanation} Confirmation: connection_lost detected within 30 seconds.";
 
             await _db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
                 "Sabotage confirmed from connection_lost -> zone={Zone}, incidentId={IncidentId}",
-                suspectedSabotage.Zone,
-                suspectedSabotage.Id);
+                openSabotage.Zone,
+                openSabotage.Id);
 
             return;
         }
@@ -536,23 +536,6 @@ public class IncidentService
                 relatedEvents: new[] { recentTamper, connectionLostEvent },
                 cancellationToken: cancellationToken);
 
-            return;
-        }
-
-        var existingOpenSabotage = await _db.Incidents
-            .Where(i =>
-                i.IncidentType == IncidentType.Sabotage &&
-                i.Zone == connectionLostEvent.Zone &&
-                i.Status == IncidentStatus.Open &&
-                i.StartedAtUtc >= windowStart &&
-                i.StartedAtUtc <= connectionLostEvent.ReceivedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (existingOpenSabotage is not null)
-        {
-            _logger.LogInformation(
-                "Open sabotage already exists for zone {Zone}, skipping new connection_lost-based sabotage",
-                connectionLostEvent.Zone);
             return;
         }
 

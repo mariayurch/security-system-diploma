@@ -15,8 +15,8 @@ static void buildWillPayload(char* payload, size_t payloadSize) {
     systemState.bootId.c_str(),
     currentEventId,
     DEVICE_ID,
-    SYSTEM_SENSOR_ID,
     DEVICE_ZONE,
+    SYSTEM_SENSOR_ID,
     systemState.armed ? "true" : "false",
     rssi,
     millis()
@@ -39,6 +39,11 @@ void setupWifi() {
 }
 
 void ensureWifi() {
+
+  if (systemState.wifiTestDisconnected) {
+    return;
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
     return;
   }
