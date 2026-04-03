@@ -19,6 +19,7 @@ public class EventsController : ControllerBase
     public async Task<IActionResult> GetEvents(
         [FromQuery] string? deviceId,
         [FromQuery] string? sensor,
+        [FromQuery] string? sensorId,
         [FromQuery(Name = "event")] string? eventName,
         [FromQuery] int limit = 20)
     {
@@ -32,6 +33,11 @@ public class EventsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(sensor))
         {
             query = query.Where(e => e.Sensor == sensor);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sensorId))
+        {
+            query = query.Where(e => e.SensorId == sensorId);
         }
 
         if (!string.IsNullOrWhiteSpace(eventName))

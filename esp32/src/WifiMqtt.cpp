@@ -11,10 +11,11 @@ static void buildWillPayload(char* payload, size_t payloadSize) {
   snprintf(
     payload,
     payloadSize,
-    "{\"bootId\":\"%s\",\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensor\":\"system\",\"event\":\"connection_lost\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
+    "{\"bootId\":\"%s\",\"eventId\":%lu,\"deviceId\":\"%s\",\"zone\":\"%s\",\"sensorId\":\"%s\",\"sensor\":\"system\",\"event\":\"connection_lost\",\"armed\":%s,\"rssi\":%ld,\"ts\":%lu}",
     systemState.bootId.c_str(),
     currentEventId,
     DEVICE_ID,
+    SYSTEM_SENSOR_ID,
     DEVICE_ZONE,
     systemState.armed ? "true" : "false",
     rssi,

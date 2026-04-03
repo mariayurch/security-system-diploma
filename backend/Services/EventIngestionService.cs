@@ -29,6 +29,7 @@ public class EventIngestionService
             EventId = dto.EventId,
             DeviceId = dto.DeviceId,
             Zone = dto.Zone,
+            SensorId = dto.SensorId,
             Sensor = dto.Sensor,
             Event = dto.Event,
             Armed = dto.Armed,

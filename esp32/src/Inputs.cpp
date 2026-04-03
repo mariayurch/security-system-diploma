@@ -16,13 +16,13 @@ static void handleArmButtonPress() {
 
   if (systemState.armed) {
     Serial.println("SYSTEM ARMED");
-    publishEvent("system", "armed");
+    publishEvent("system", SYSTEM_SENSOR_ID, "armed");
     queueArmConfirmBeep();
     return;
   }
 
   Serial.println("SYSTEM DISARMED");
-  publishEvent("system", "disarmed");
+  publishEvent("system", SYSTEM_SENSOR_ID, "disarmed");
 
   const bool wasAlarmActive = systemState.alarmActive;
   stopAlarm();
@@ -36,7 +36,7 @@ static void handleArmButtonPress() {
 
 static void handlePanicButtonPress() {
   Serial.println("PANIC BUTTON PRESSED");
-  publishEvent("panic_button", "pressed");
+  publishEvent("panic_button", PANIC_SENSOR_ID, "pressed");
   startAlarm();
 }
 
@@ -47,10 +47,10 @@ static void handleDoorStableChange(int newState) {
 
   if (newState == LOW) {
     Serial.println("DOOR CLOSED");
-    publishEvent("door", "closed");
+    publishEvent("door", DOOR_SENSOR_ID, "closed");
   } else {
     Serial.println("DOOR OPEN");
-    publishEvent("door", "open");
+    publishEvent("door", DOOR_SENSOR_ID, "open");
   }
 
   startAlarm();
@@ -63,11 +63,11 @@ static void handleMotionStableChange(int newState) {
 
   if (newState == HIGH) {
     Serial.println("MOTION DETECTED");
-    publishEvent("motion", "detected");
+    publishEvent("motion", MOTION_SENSOR_ID, "detected");
     startAlarm();
   } else {
     Serial.println("MOTION RESTORED");
-    publishEvent("motion", "restored");
+    publishEvent("motion", MOTION_SENSOR_ID, "restored");
   }
 }
 
@@ -78,10 +78,10 @@ static void handleDoorTamperStableChange(int newState) {
 
   if (newState == LOW) {
     Serial.println("DOOR TAMPER RESTORED");
-    publishEvent("door_tamper", "restored");
+    publishEvent("door_tamper", DOOR_TAMPER_SENSOR_ID, "restored");
   } else {
     Serial.println("DOOR TAMPER TRIGGERED");
-    publishEvent("door_tamper", "triggered");
+    publishEvent("door_tamper", DOOR_TAMPER_SENSOR_ID, "triggered");
     startAlarm();
   }
 }
@@ -93,10 +93,10 @@ static void handleMotionTamperStableChange(int newState) {
 
   if (newState == LOW) {
     Serial.println("MOTION TAMPER RESTORED");
-    publishEvent("motion_tamper", "restored");
+    publishEvent("motion_tamper", MOTION_TAMPER_SENSOR_ID, "restored");
   } else {
     Serial.println("MOTION TAMPER TRIGGERED");
-    publishEvent("motion_tamper", "triggered");
+    publishEvent("motion_tamper", MOTION_TAMPER_SENSOR_ID, "triggered");
     startAlarm();
   }
 }

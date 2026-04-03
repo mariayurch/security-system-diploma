@@ -32,6 +32,12 @@ constexpr const char* STATUS_TOPIC = "home/security/status";
 // ------------------------
 constexpr const char* DEVICE_ID = "esp32-1";
 constexpr const char* DEVICE_ZONE = "room1";
+constexpr const char* SYSTEM_SENSOR_ID = "system-1";
+constexpr const char* DOOR_SENSOR_ID = "door-1";
+constexpr const char* MOTION_SENSOR_ID = "motion-1";
+constexpr const char* DOOR_TAMPER_SENSOR_ID = "door-tamper-1";
+constexpr const char* MOTION_TAMPER_SENSOR_ID = "motion-tamper-1";
+constexpr const char* PANIC_SENSOR_ID = "panic-1";
 
 // ------------------------
 // Timing / debounce

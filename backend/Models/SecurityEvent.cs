@@ -7,6 +7,7 @@ public class SecurityEvent
     public long EventId { get; set; }
     public string DeviceId { get; set; } = default!;
     public string Zone { get; set; } = default!;
+    public string SensorId { get; set; } = default!;
     public string Sensor { get; set; } = default!;
     public string Event { get; set; } = default!;
     public bool Armed { get; set; }

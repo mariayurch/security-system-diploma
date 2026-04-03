@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
 
             entity.Property(e => e.DeviceId).HasMaxLength(100);
             entity.Property(e => e.Zone).HasMaxLength(100);
+            entity.Property(e => e.SensorId).HasMaxLength(100);
             entity.Property(e => e.Sensor).HasMaxLength(100);
             entity.Property(e => e.Event).HasMaxLength(100);
             entity.Property(e => e.BootId).HasMaxLength(100);
