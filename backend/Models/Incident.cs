@@ -8,7 +8,7 @@ public class Incident
 
     public IncidentType IncidentType { get; set; }
     public IncidentStatus Status { get; set; }
-
+    public IncidentConfidence Confidence { get; set; }
     public string Zone { get; set; } = default!;
     public DateTime StartedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }
