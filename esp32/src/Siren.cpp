@@ -9,6 +9,9 @@ struct PatternStep {
   unsigned long pauseAfterMs;
 };
 
+static constexpr int BUZZER_LEDC_CHANNEL = 0;
+static constexpr int BUZZER_LEDC_RESOLUTION = 8;
+
 static constexpr PatternStep ARM_CONFIRM_STEPS[] = {
   {2000, 90, 80},
   {2000, 90, 0}
@@ -41,6 +44,16 @@ static const PatternStep* patternSteps(BeepPattern pattern, size_t& count) {
   }
 }
 
+static void ensureBuzzerInitialized() {
+  if (sirenState.buzzerInitialized) {
+    return;
+  }
+
+  ledcSetup(BUZZER_LEDC_CHANNEL, 2000, BUZZER_LEDC_RESOLUTION);
+  ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CHANNEL);
+  sirenState.buzzerInitialized = true;
+}
+
 static void resetSirenSweep() {
   sirenState.frequency = SIREN_MIN_FREQ;
   sirenState.rampUp = true;
@@ -56,13 +69,29 @@ static void clearBeepPattern() {
   sirenState.pendingPauseMs = 0;
 }
 
+static void startToneOnBuzzer(int frequency) {
+  ensureBuzzerInitialized();
+  ledcWriteTone(BUZZER_LEDC_CHANNEL, frequency);
+  sirenState.toneOn = true;
+}
+
+static void stopToneOnBuzzer() {
+  if (!sirenState.buzzerInitialized || !sirenState.toneOn) {
+    return;
+  }
+
+  ledcWriteTone(BUZZER_LEDC_CHANNEL, 0);
+  ledcWrite(BUZZER_LEDC_CHANNEL, 0);
+  sirenState.toneOn = false;
+}
+
 static void startPatternStep(const PatternStep& step) {
   sirenState.toneOn = true;
   sirenState.stepStartedMs = millis();
   sirenState.currentToneFrequency = step.frequency;
   sirenState.currentStepDurationMs = step.durationMs;
   sirenState.pendingPauseMs = step.pauseAfterMs;
-  tone(BUZZER_PIN, step.frequency);
+  startToneOnBuzzer(step.frequency);
 }
 
 static void queueBeepPattern(BeepPattern pattern) {
@@ -81,7 +110,7 @@ void startAlarm() {
 
 void stopAlarm() {
   systemState.alarmActive = false;
-  noTone(BUZZER_PIN);
+  stopToneOnBuzzer();
   resetSirenSweep();
 }
 
@@ -108,7 +137,7 @@ static void updateAlarmSweep() {
   }
 
   sirenState.lastSirenStepMs = now;
-  tone(BUZZER_PIN, sirenState.frequency);
+  startToneOnBuzzer(sirenState.frequency);
 
   if (sirenState.rampUp) {
     sirenState.frequency += SIREN_STEP_FREQ;
@@ -137,7 +166,7 @@ static void updateBeepPattern() {
 
   if (sirenState.stepIndex >= count) {
     clearBeepPattern();
-    noTone(BUZZER_PIN);
+    stopToneOnBuzzer();
     return;
   }
 
@@ -150,7 +179,7 @@ static void updateBeepPattern() {
 
   if (sirenState.toneOn) {
     if (now - sirenState.stepStartedMs >= sirenState.currentStepDurationMs) {
-      noTone(BUZZER_PIN);
+      stopToneOnBuzzer();
       sirenState.toneOn = false;
       sirenState.stepStartedMs = now;
 

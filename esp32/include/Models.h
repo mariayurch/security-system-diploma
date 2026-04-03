@@ -31,6 +31,7 @@ struct SirenState {
   int frequency = 1500;
   bool rampUp = true;
   unsigned long lastSirenStepMs = 0;
+  bool buzzerInitialized = false;
 
   BeepPattern activePattern = BeepPattern::None;
   bool toneOn = false;
