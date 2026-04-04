@@ -1,81 +1,150 @@
-# Security Monitoring System (Diploma)
+#  Security Monitoring & Incident Correlation System
 
-ESP32-based security monitoring and incident correlation system developed as a diploma project.
+ESP32-based security monitoring system with event correlation and incident detection.
 
-The project consists of two main parts:
+This project is developed as a diploma work and demonstrates a full-stack IoT security solution:
+- embedded firmware
+- event streaming
+- backend processing
+- incident correlation
 
-- **ESP32 firmware** that reads sensors, applies debounce filtering, controls local indication / siren logic, and publishes telemetry via MQTT
-- **ASP.NET Core backend** that receives events, stores them in PostgreSQL, correlates them in time windows, and forms security incidents
+---
 
-## Implemented functionality
+##  Overview
 
-### ESP32 firmware
+The system collects telemetry from physical security sensors and transforms raw events into meaningful security incidents using time-based correlation logic.
 
-- arm / disarm mode
-- door sensor events
-- motion sensor (PIR) events
-- tamper events
-- panic button handling
-- local buzzer / siren signaling
-- LED indication
-- MQTT event publishing in JSON format
-- boot event
-- heartbeat event
-- RSSI telemetry
-- connection monitoring via MQTT status + Last Will
+Instead of sending every sensor trigger as a separate alert, the system:
+- aggregates events
+- analyzes temporal relationships
+- classifies incidents
+- provides human-readable explanations
 
-### Backend
+---
 
-- MQTT subscription to `home/security/events` and `home/security/status`
-- JSON event ingestion
-- raw event journaling in PostgreSQL
-- duplicate event protection
-- incident journaling
-- time-window-based event correlation
-- security incident formation with textual explanations
-- REST API endpoints for events and incidents
+##  Architecture
+ESP32 → MQTT broker → ASP.NET Core backend → PostgreSQL → Telegram bot
 
-## Implemented incident types
 
-### Intrusion
-Current logic includes:
+---
 
-- **Suspected intrusion**
-  - first door open after arming
-  - first motion detection after arming
-- **Confirmed intrusion**
-  - repeated trigger from the same sensor in the correlation window
-  - or correlation between perimeter event and motion event
+##  Components
 
-Additional rules:
-- repeated confirmed motion events are limited by long cooldown logic
-- repeated confirmed door events are limited within the current armed session
+### 🔹 ESP32 Firmware
 
-### Sabotage
-Current logic includes:
+- arm / disarm system
+- door sensor (reed switch)
+- motion sensor (PIR)
+- tamper detection
+- panic button
+- LED indication (armed / disarmed)
+- buzzer / siren signaling
+- debounce filtering
+- MQTT publishing (JSON)
+- heartbeat + RSSI telemetry
+- connection monitoring (Last Will)
 
-- **Suspected sabotage**
-  - tamper trigger while armed
-  - connection loss while armed
-- **Confirmed sabotage**
-  - tamper + connection loss in the correlation window
-  - multiple sabotage-related signals in the same armed session
+---
 
-### Panic
-Current logic includes:
+### 🔹 Backend (ASP.NET Core)
 
-- immediate **confirmed** incident on panic button press
-- duplicate suppression in a short time window
+- MQTT event ingestion
+- JSON parsing
+- PostgreSQL storage (events + incidents)
+- duplicate protection
+- correlation engine
+- incident classification
+- REST API
 
-### Sensor Anomaly
-Current logic includes:
+---
 
-- repeated identical events from the same sensor in a sliding time window
+##  Incident Correlation Logic
+
+The system uses time-based correlation to convert events into incidents.
+
+### 🔸 Intrusion
+
+- **Suspected**
+  - door open OR motion after arming
+- **Confirmed**
+  - repeated trigger
+  - OR door + motion correlation
+
+---
+
+### 🔸 Sabotage
+
+- **Suspected**
+  - connection lost
+  - OR tamper event
+- **Confirmed**
+  - tamper + connection loss
+  - multiple tamper signals
+
+---
+
+### 🔸 Panic
+
+- immediate confirmed incident
+- no correlation required
+
+---
+
+### 🔸 Sensor Anomaly
+
+- high-frequency repeated triggers
+- sliding window detection
 - sensor-specific thresholds
-- dedicated anomaly handling for noisy motion behavior during long intrusion cooldown
 
-## Architecture
+---
 
-```text
-ESP32 → MQTT broker → ASP.NET Core backend → PostgreSQL
-                                   └→ Telegram bot (planned)
+##  Features
+
+- event → incident transformation
+- time-window correlation
+- duplicate suppression
+- noise filtering
+- long cooldown for motion sensors
+- human-readable incident explanation
+
+---
+
+##  MQTT Topics
+
+- `home/security/events`
+- `home/security/status`
+
+---
+
+##  Data Storage
+
+- raw events journal
+- incident journal
+- correlation metadata
+
+---
+
+##  Planned Features
+
+- Telegram bot notifications
+- incident acknowledgment
+- web dashboard
+- analytics
+
+---
+
+##  Diploma Goal
+
+To design and implement a system that:
+- collects security telemetry
+- correlates events in time
+- detects incidents
+- reduces noise
+- provides meaningful alerts
+
+---
+
+##  Key Idea
+
+> Not every event is an incident.  
+> The system understands context.
