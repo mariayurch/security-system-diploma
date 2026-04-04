@@ -182,6 +182,7 @@ public partial class IncidentService
             $"{suspectedIntrusion.Explanation} Confirmation: perimeter trigger from {perimeterEvent.SensorId} repeated within 30 seconds.";
 
         await _db.SaveChangesAsync(cancellationToken);
+        await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
 
         _logger.LogInformation(
             "Intrusion confirmed from repeated perimeter trigger -> zone={Zone}, incidentId={IncidentId}",
@@ -210,6 +211,7 @@ public partial class IncidentService
             $"{suspectedIntrusion.Explanation} Confirmation: motion detected from {motionEvent.SensorId} within 30 seconds.";
 
         await _db.SaveChangesAsync(cancellationToken);
+        await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
 
         _logger.LogInformation(
             "Intrusion confirmed from motion event -> zone={Zone}, incidentId={IncidentId}",

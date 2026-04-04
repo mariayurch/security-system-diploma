@@ -1,6 +1,7 @@
 using backend.Data;
 using backend.Services;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Telegram;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +11,12 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.Configure<TelegramOptions>(builder.Configuration.GetSection("Telegram"));
+
+builder.Services.AddSingleton<TelegramMessageFormatter>();
+
+builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>();
 
 builder.Services.AddScoped<EventIngestionService>();
 builder.Services.AddScoped<IncidentService>();

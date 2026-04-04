@@ -1,6 +1,7 @@
 using backend.Data;
 using backend.Models;
 using backend.Models.Enums;
+using backend.Services.Telegram;
 
 namespace backend.Services;
 
@@ -16,10 +17,16 @@ public partial class IncidentService
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentService> _logger;
 
-    public IncidentService(AppDbContext db, ILogger<IncidentService> logger)
+    private readonly ITelegramNotificationService _telegram;
+
+    public IncidentService(
+        AppDbContext db,
+        ILogger<IncidentService> logger,
+        ITelegramNotificationService telegram)
     {
         _db = db;
         _logger = logger;
+        _telegram = telegram;
     }
 
     public async Task ProcessEventAsync(SecurityEvent securityEvent, CancellationToken cancellationToken = default)

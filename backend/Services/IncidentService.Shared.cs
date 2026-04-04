@@ -73,6 +73,7 @@ public partial class IncidentService
 
         _db.Incidents.Add(incident);
         await _db.SaveChangesAsync(cancellationToken);
+        await _telegram.SendIncidentCreatedAsync(incident, cancellationToken);
 
         _logger.LogInformation(
             "{IncidentType} incident created -> zone={Zone}, incidentId={IncidentId}, confidence={Confidence}",
