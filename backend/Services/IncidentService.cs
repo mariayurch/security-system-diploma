@@ -10,7 +10,18 @@ public class IncidentService
     private static readonly TimeSpan IntrusionConfirmationWindow = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PanicDedupWindow = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SensorAnomalyWindow = TimeSpan.FromMinutes(1);
-    private const int SensorAnomalyThreshold = 10;
+    private static readonly TimeSpan MotionConfirmedCooldown = TimeSpan.FromHours(2);
+    private static readonly TimeSpan MotionAnomalyDuringCooldownWindow = TimeSpan.FromMinutes(5);
+    private const int MotionAnomalyDuringCooldownThreshold = 5; 
+    private int SensorAnomalyThreshold(SecurityEvent e)
+    {
+        if (e.Sensor == "motion")
+        {
+            return 5;
+        }
+
+        return 10;
+    }
 
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentService> _logger;
@@ -40,25 +51,21 @@ public class IncidentService
         if (IsPerimeterTrigger(securityEvent))
         {
             await TryCreateOrConfirmIntrusionFromPerimeterAsync(securityEvent, cancellationToken);
-            return;
         }
 
         if (IsMotionTrigger(securityEvent))
         {
             await TryCreateOrConfirmIntrusionFromMotionAsync(securityEvent, cancellationToken);
-            return;
         }
 
         if (IsTamperTrigger(securityEvent))
         {
             await TryCreateOrConfirmSabotageFromTamperAsync(securityEvent, cancellationToken);
-            return;
         }
 
         if (IsConnectionLostTrigger(securityEvent))
         {
             await TryCreateOrConfirmSabotageFromConnectionLostAsync(securityEvent, cancellationToken);
-            return;
         }
 
         if (IsAnomalyCandidate(securityEvent))
@@ -231,6 +238,34 @@ public class IncidentService
             motionEvent.Zone,
             motionEvent.ReceivedAtUtc,
             cancellationToken);
+
+        var isInCooldown = await IsMotionSensorInCooldownAsync(
+            motionEvent,
+            cancellationToken);
+
+        if (isInCooldown)
+        {
+            _logger.LogInformation(
+                "Motion sensor {SensorId} in zone {Zone} is in long cooldown; intrusion creation skipped",
+                motionEvent.SensorId,
+                motionEvent.Zone);
+
+            await TryCreateMotionAnomalyDuringCooldownAsync(motionEvent, cancellationToken);
+            return;
+        }
+
+        var hasRecentConfirmedIntrusion = await HasRecentConfirmedIntrusionForMotionSensorAsync(
+                motionEvent,
+                cancellationToken);
+
+        if (hasRecentConfirmedIntrusion)
+        {
+            _logger.LogInformation(
+                "Skipping intrusion confirmation for motion sensor {SensorId} in zone {Zone} due to cooldown",
+                motionEvent.SensorId,
+                motionEvent.Zone);
+            return;
+        }
 
         var suspectedIntrusion = await _db.Incidents
             .Include(i => i.IncidentEventLinks)
@@ -687,9 +722,158 @@ public class IncidentService
             incident.Id);
     }
 
+    private async Task<bool> HasRecentConfirmedIntrusionForMotionSensorAsync(
+    SecurityEvent motionEvent,
+    CancellationToken cancellationToken)
+    {
+        var armedSessionStart = await GetCorrelationWindowStartAsync(
+            motionEvent.DeviceId,
+            motionEvent.Zone,
+            motionEvent.ReceivedAtUtc,
+            cancellationToken);
+
+        var cooldownStart = motionEvent.ReceivedAtUtc - MotionConfirmedCooldown;
+        if (armedSessionStart > cooldownStart)
+        {
+            cooldownStart = armedSessionStart;
+        }
+
+        return await _db.Incidents
+            .Include(i => i.IncidentEventLinks)
+            .ThenInclude(link => link.SecurityEvent)
+            .Where(i =>
+                i.IncidentType == IncidentType.Intrusion &&
+                i.Zone == motionEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.Confidence == IncidentConfidence.Confirmed &&
+                i.StartedAtUtc >= cooldownStart &&
+                i.StartedAtUtc <= motionEvent.ReceivedAtUtc)
+            .AnyAsync(i =>
+                i.IncidentEventLinks.Any(link =>
+                    link.SecurityEvent != null &&
+                    link.SecurityEvent.Sensor == "motion" &&
+                    link.SecurityEvent.SensorId == motionEvent.SensorId),
+                cancellationToken);
+    }
+
+    private async Task<bool> IsMotionSensorInCooldownAsync(
+        SecurityEvent motionEvent,
+        CancellationToken cancellationToken)
+    {
+        var lastArmedAtUtc = await GetLastArmedAtUtcAsync(
+            motionEvent.DeviceId,
+            motionEvent.Zone,
+            motionEvent.ReceivedAtUtc,
+            cancellationToken);
+
+        var cooldownStart = motionEvent.ReceivedAtUtc - MotionConfirmedCooldown;
+
+        if (lastArmedAtUtc.HasValue && lastArmedAtUtc.Value > cooldownStart)
+        {
+            cooldownStart = lastArmedAtUtc.Value;
+        }
+
+        return await _db.Incidents
+            .Include(i => i.IncidentEventLinks)
+            .ThenInclude(link => link.SecurityEvent)
+            .Where(i =>
+                i.IncidentType == IncidentType.Intrusion &&
+                i.Zone == motionEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.Confidence == IncidentConfidence.Confirmed &&
+                i.StartedAtUtc >= cooldownStart &&
+                i.StartedAtUtc <= motionEvent.ReceivedAtUtc)
+            .AnyAsync(i =>
+                i.IncidentEventLinks.Any(link =>
+                    link.SecurityEvent != null &&
+                    link.SecurityEvent.Sensor == "motion" &&
+                    link.SecurityEvent.SensorId == motionEvent.SensorId),
+                cancellationToken);
+    }
+
+    private async Task TryCreateMotionAnomalyDuringCooldownAsync(
+        SecurityEvent motionEvent,
+        CancellationToken cancellationToken)
+    {
+        var windowStart = motionEvent.ReceivedAtUtc - MotionAnomalyDuringCooldownWindow;
+
+        var recentCount = await _db.SecurityEvents
+            .Where(e =>
+                e.DeviceId == motionEvent.DeviceId &&
+                e.Zone == motionEvent.Zone &&
+                e.SensorId == motionEvent.SensorId &&
+                e.Sensor == "motion" &&
+                e.Event == "detected" &&
+                e.ReceivedAtUtc >= windowStart &&
+                e.ReceivedAtUtc <= motionEvent.ReceivedAtUtc)
+            .CountAsync(cancellationToken);
+
+        if (recentCount < MotionAnomalyDuringCooldownThreshold)
+        {
+            return;
+        }
+
+        var existingIncident = await _db.Incidents
+            .Where(i =>
+                i.IncidentType == IncidentType.SensorAnomaly &&
+                i.Zone == motionEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.StartedAtUtc >= windowStart &&
+                i.StartedAtUtc <= motionEvent.ReceivedAtUtc &&
+                i.Explanation.Contains(motionEvent.SensorId))
+            .OrderByDescending(i => i.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingIncident is not null)
+        {
+            _logger.LogInformation(
+                "Motion anomaly already exists during cooldown for sensorId={SensorId} in zone={Zone}",
+                motionEvent.SensorId,
+                motionEvent.Zone);
+            return;
+        }
+
+        var incident = new Incident
+        {
+            IncidentType = IncidentType.SensorAnomaly,
+            Status = IncidentStatus.Open,
+            Confidence = IncidentConfidence.Confirmed,
+            Zone = motionEvent.Zone,
+            StartedAtUtc = motionEvent.ReceivedAtUtc,
+            Explanation =
+                $"Sensor anomaly detected: motion sensor {motionEvent.SensorId} continued triggering during intrusion cooldown and produced {recentCount} events within {MotionAnomalyDuringCooldownWindow.TotalMinutes:0} minutes."
+        };
+
+        incident.IncidentEventLinks.Add(new IncidentEventLink
+        {
+            SecurityEventId = motionEvent.Id
+        });
+
+        _db.Incidents.Add(incident);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Motion anomaly during cooldown created -> sensorId={SensorId}, zone={Zone}, incidentId={IncidentId}",
+            motionEvent.SensorId,
+            motionEvent.Zone,
+            incident.Id);
+    }
+
     private async Task TryCreateSensorAnomalyAsync(SecurityEvent securityEvent, CancellationToken cancellationToken)
     {
-        var windowStart = securityEvent.ReceivedAtUtc - SensorAnomalyWindow;
+        var timeWindowStart = securityEvent.ReceivedAtUtc - SensorAnomalyWindow;
+
+        var lastArmedAtUtc = await GetLastArmedAtUtcAsync(
+            securityEvent.DeviceId,
+            securityEvent.Zone,
+            securityEvent.ReceivedAtUtc,
+            cancellationToken);
+
+        var windowStart = lastArmedAtUtc.HasValue && lastArmedAtUtc.Value > timeWindowStart
+            ? lastArmedAtUtc.Value
+            : timeWindowStart;
+            
+        var threshold = SensorAnomalyThreshold(securityEvent);
 
         var recentCount = await _db.SecurityEvents
             .Where(e =>
@@ -702,7 +886,7 @@ public class IncidentService
                 e.ReceivedAtUtc <= securityEvent.ReceivedAtUtc)
             .CountAsync(cancellationToken);
 
-        if (recentCount < SensorAnomalyThreshold)
+        if (recentCount < threshold)
         {
             return;
         }
@@ -747,7 +931,7 @@ public class IncidentService
             Zone = securityEvent.Zone,
             StartedAtUtc = relatedEvents.First().ReceivedAtUtc,
             Explanation =
-                $"Sensor anomaly detected: sensor {securityEvent.SensorId} ({securityEvent.Sensor}/{securityEvent.Event}) produced {recentCount} events within {SensorAnomalyWindow.TotalSeconds:0} seconds."
+            $"Sensor anomaly detected: sensor {securityEvent.SensorId} ({securityEvent.Sensor}/{securityEvent.Event}) produced {recentCount} events within {SensorAnomalyWindow.TotalSeconds:0} seconds (threshold {threshold})."
         };
 
         foreach (var relatedEvent in relatedEvents)
