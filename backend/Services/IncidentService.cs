@@ -9,9 +9,19 @@ public class IncidentService
 {
     private static readonly TimeSpan IntrusionConfirmationWindow = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PanicDedupWindow = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SensorAnomalyWindow = TimeSpan.FromMinutes(1);
+    private const int SensorAnomalyThreshold = 10;
 
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentService> _logger;
+
+    private bool IsAnomalyCandidate(SecurityEvent e)
+    {
+        return e.Sensor == "door" ||
+            e.Sensor == "motion" ||
+            e.Sensor == "door_tamper" ||
+            e.Sensor == "motion_tamper";
+    }
 
     public IncidentService(AppDbContext db, ILogger<IncidentService> logger)
     {
@@ -49,6 +59,11 @@ public class IncidentService
         {
             await TryCreateOrConfirmSabotageFromConnectionLostAsync(securityEvent, cancellationToken);
             return;
+        }
+
+        if (IsAnomalyCandidate(securityEvent))
+        {
+            await TryCreateSensorAnomalyAsync(securityEvent, cancellationToken);
         }
     }
 
@@ -668,6 +683,87 @@ public class IncidentService
 
         _logger.LogInformation(
             "Confirmed sabotage incident created -> zone={Zone}, incidentId={IncidentId}",
+            incident.Zone,
+            incident.Id);
+    }
+
+    private async Task TryCreateSensorAnomalyAsync(SecurityEvent securityEvent, CancellationToken cancellationToken)
+    {
+        var windowStart = securityEvent.ReceivedAtUtc - SensorAnomalyWindow;
+
+        var recentCount = await _db.SecurityEvents
+            .Where(e =>
+                e.DeviceId == securityEvent.DeviceId &&
+                e.Zone == securityEvent.Zone &&
+                e.SensorId == securityEvent.SensorId &&
+                e.Sensor == securityEvent.Sensor &&
+                e.Event == securityEvent.Event &&
+                e.ReceivedAtUtc >= windowStart &&
+                e.ReceivedAtUtc <= securityEvent.ReceivedAtUtc)
+            .CountAsync(cancellationToken);
+
+        if (recentCount < SensorAnomalyThreshold)
+        {
+            return;
+        }
+
+        var existingIncident = await _db.Incidents
+            .Where(i =>
+                i.IncidentType == IncidentType.SensorAnomaly &&
+                i.Zone == securityEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.StartedAtUtc >= windowStart &&
+                i.StartedAtUtc <= securityEvent.ReceivedAtUtc &&
+                i.Explanation.Contains(securityEvent.SensorId))
+            .OrderByDescending(i => i.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingIncident is not null)
+        {
+            _logger.LogInformation(
+                "Sensor anomaly already exists for sensorId={SensorId} in zone={Zone}",
+                securityEvent.SensorId,
+                securityEvent.Zone);
+            return;
+        }
+
+        var relatedEvents = await _db.SecurityEvents
+            .Where(e =>
+                e.DeviceId == securityEvent.DeviceId &&
+                e.Zone == securityEvent.Zone &&
+                e.SensorId == securityEvent.SensorId &&
+                e.Sensor == securityEvent.Sensor &&
+                e.Event == securityEvent.Event &&
+                e.ReceivedAtUtc >= windowStart &&
+                e.ReceivedAtUtc <= securityEvent.ReceivedAtUtc)
+            .OrderBy(e => e.ReceivedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var incident = new Incident
+        {
+            IncidentType = IncidentType.SensorAnomaly,
+            Status = IncidentStatus.Open,
+            Confidence = IncidentConfidence.Confirmed,
+            Zone = securityEvent.Zone,
+            StartedAtUtc = relatedEvents.First().ReceivedAtUtc,
+            Explanation =
+                $"Sensor anomaly detected: sensor {securityEvent.SensorId} ({securityEvent.Sensor}/{securityEvent.Event}) produced {recentCount} events within {SensorAnomalyWindow.TotalSeconds:0} seconds."
+        };
+
+        foreach (var relatedEvent in relatedEvents)
+        {
+            incident.IncidentEventLinks.Add(new IncidentEventLink
+            {
+                SecurityEventId = relatedEvent.Id
+            });
+        }
+
+        _db.Incidents.Add(incident);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Sensor anomaly incident created -> sensorId={SensorId}, zone={Zone}, incidentId={IncidentId}",
+            securityEvent.SensorId,
             incident.Zone,
             incident.Id);
     }
