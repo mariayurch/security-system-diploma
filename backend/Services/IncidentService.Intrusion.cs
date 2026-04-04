@@ -179,7 +179,8 @@ public partial class IncidentService
 
         suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
         suspectedIntrusion.Explanation =
-            $"{suspectedIntrusion.Explanation} Confirmation: perimeter trigger from {perimeterEvent.SensorId} repeated within 30 seconds.";
+            $"Confirmed intrusion: perimeter trigger from {perimeterEvent.SensorId} " +
+            $"({perimeterEvent.Sensor}/{perimeterEvent.Event}) while system was armed. ";
 
         await _db.SaveChangesAsync(cancellationToken);
         await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
@@ -208,7 +209,8 @@ public partial class IncidentService
 
         suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
         suspectedIntrusion.Explanation =
-            $"{suspectedIntrusion.Explanation} Confirmation: motion detected from {motionEvent.SensorId} within 30 seconds.";
+            $"Confirmed intrusion: perimeter trigger from {motionEvent.SensorId} " +
+            $"({motionEvent.Sensor}/{motionEvent.Event}) while system was armed. ";
 
         await _db.SaveChangesAsync(cancellationToken);
         await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
