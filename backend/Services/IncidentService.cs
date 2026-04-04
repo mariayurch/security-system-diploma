@@ -161,6 +161,19 @@ public class IncidentService
             perimeterEvent.ReceivedAtUtc,
             cancellationToken);
 
+        var alreadyConfirmedForThisDoor = await HasConfirmedIntrusionForDoorSensorInCurrentArmedSessionAsync(
+            perimeterEvent,
+            cancellationToken);
+
+        if (alreadyConfirmedForThisDoor)
+        {
+            _logger.LogInformation(
+                "Door sensor {SensorId} in zone {Zone} already produced a confirmed intrusion in the current armed session; skipping new perimeter intrusion",
+                perimeterEvent.SensorId,
+                perimeterEvent.Zone);
+            return;
+        }
+
         var recentMotion = await _db.SecurityEvents
             .Where(e =>
                 e.DeviceId == perimeterEvent.DeviceId &&
@@ -185,6 +198,46 @@ public class IncidentService
                     $"and motion trigger {recentMotion.SensorId} were detected within 30 seconds while system was armed.",
                 relatedEvents: new[] { perimeterEvent, recentMotion },
                 cancellationToken: cancellationToken);
+
+            return;
+        }
+
+        var suspectedIntrusion = await _db.Incidents
+            .Include(i => i.IncidentEventLinks)
+            .ThenInclude(link => link.SecurityEvent)
+            .Where(i =>
+                i.IncidentType == IncidentType.Intrusion &&
+                i.Zone == perimeterEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.Confidence == IncidentConfidence.Suspected &&
+                i.StartedAtUtc >= windowStart &&
+                i.StartedAtUtc <= perimeterEvent.ReceivedAtUtc)
+            .OrderByDescending(i => i.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (suspectedIntrusion is not null)
+        {
+            var alreadyLinked = suspectedIntrusion.IncidentEventLinks
+                .Any(link => link.SecurityEventId == perimeterEvent.Id);
+
+            if (!alreadyLinked)
+            {
+                suspectedIntrusion.IncidentEventLinks.Add(new IncidentEventLink
+                {
+                    SecurityEventId = perimeterEvent.Id
+                });
+            }
+
+            suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
+            suspectedIntrusion.Explanation =
+                $"{suspectedIntrusion.Explanation} Confirmation: perimeter trigger from {perimeterEvent.SensorId} repeated within 30 seconds.";
+
+            await _db.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Intrusion confirmed from repeated perimeter trigger -> zone={Zone}, incidentId={IncidentId}",
+                suspectedIntrusion.Zone,
+                suspectedIntrusion.Id);
 
             return;
         }
@@ -756,6 +809,39 @@ public class IncidentService
                 cancellationToken);
     }
 
+    private async Task<bool> HasConfirmedIntrusionForDoorSensorInCurrentArmedSessionAsync(
+        SecurityEvent perimeterEvent,
+        CancellationToken cancellationToken)
+    {
+        var lastArmedAtUtc = await GetLastArmedAtUtcAsync(
+            perimeterEvent.DeviceId,
+            perimeterEvent.Zone,
+            perimeterEvent.ReceivedAtUtc,
+            cancellationToken);
+
+        if (!lastArmedAtUtc.HasValue)
+        {
+            return false;
+        }
+
+        return await _db.Incidents
+            .Include(i => i.IncidentEventLinks)
+            .ThenInclude(link => link.SecurityEvent)
+            .Where(i =>
+                i.IncidentType == IncidentType.Intrusion &&
+                i.Zone == perimeterEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.Confidence == IncidentConfidence.Confirmed &&
+                i.StartedAtUtc >= lastArmedAtUtc.Value &&
+                i.StartedAtUtc <= perimeterEvent.ReceivedAtUtc)
+            .AnyAsync(i =>
+                i.IncidentEventLinks.Any(link =>
+                    link.SecurityEvent != null &&
+                    link.SecurityEvent.Sensor == "door" &&
+                    link.SecurityEvent.SensorId == perimeterEvent.SensorId),
+                cancellationToken);
+    }
+
     private async Task<bool> IsMotionSensorInCooldownAsync(
         SecurityEvent motionEvent,
         CancellationToken cancellationToken)
@@ -791,11 +877,59 @@ public class IncidentService
                 cancellationToken);
     }
 
+    private async Task<Incident?> GetConfirmedIntrusionForMotionSensorInCooldownAsync(
+        SecurityEvent motionEvent,
+        CancellationToken cancellationToken)
+    {
+        var lastArmedAtUtc = await GetLastArmedAtUtcAsync(
+            motionEvent.DeviceId,
+            motionEvent.Zone,
+            motionEvent.ReceivedAtUtc,
+            cancellationToken);
+
+        var cooldownStart = motionEvent.ReceivedAtUtc - MotionConfirmedCooldown;
+
+        if (lastArmedAtUtc.HasValue && lastArmedAtUtc.Value > cooldownStart)
+        {
+            cooldownStart = lastArmedAtUtc.Value;
+        }
+
+        return await _db.Incidents
+            .Include(i => i.IncidentEventLinks)
+            .ThenInclude(link => link.SecurityEvent)
+            .Where(i =>
+                i.IncidentType == IncidentType.Intrusion &&
+                i.Zone == motionEvent.Zone &&
+                i.Status == IncidentStatus.Open &&
+                i.Confidence == IncidentConfidence.Confirmed &&
+                i.StartedAtUtc >= cooldownStart &&
+                i.StartedAtUtc <= motionEvent.ReceivedAtUtc)
+            .Where(i =>
+                i.IncidentEventLinks.Any(link =>
+                    link.SecurityEvent != null &&
+                    link.SecurityEvent.Sensor == "motion" &&
+                    link.SecurityEvent.SensorId == motionEvent.SensorId))
+            .OrderByDescending(i => i.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private async Task TryCreateMotionAnomalyDuringCooldownAsync(
         SecurityEvent motionEvent,
         CancellationToken cancellationToken)
     {
-        var windowStart = motionEvent.ReceivedAtUtc - MotionAnomalyDuringCooldownWindow;
+        var confirmedIntrusion = await GetConfirmedIntrusionForMotionSensorInCooldownAsync(
+            motionEvent,
+            cancellationToken);
+
+        if (confirmedIntrusion is null)
+        {
+            return;
+        }
+
+        var timeWindowStart = motionEvent.ReceivedAtUtc - MotionAnomalyDuringCooldownWindow;
+        var windowStart = confirmedIntrusion.StartedAtUtc > timeWindowStart
+            ? confirmedIntrusion.StartedAtUtc
+            : timeWindowStart;
 
         var recentCount = await _db.SecurityEvents
             .Where(e =>
@@ -841,7 +975,7 @@ public class IncidentService
             Zone = motionEvent.Zone,
             StartedAtUtc = motionEvent.ReceivedAtUtc,
             Explanation =
-                $"Sensor anomaly detected: motion sensor {motionEvent.SensorId} continued triggering during intrusion cooldown and produced {recentCount} events within {MotionAnomalyDuringCooldownWindow.TotalMinutes:0} minutes."
+                $"Sensor anomaly detected: motion sensor {motionEvent.SensorId} continued triggering after confirmed intrusion and produced {recentCount} events within cooldown monitoring window."
         };
 
         incident.IncidentEventLinks.Add(new IncidentEventLink
