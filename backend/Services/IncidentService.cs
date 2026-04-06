@@ -67,7 +67,9 @@ public partial class IncidentService
         e.Sensor == "panic_button" && e.Event == "pressed";
 
     private static bool IsPerimeterTrigger(SecurityEvent e) =>
-        e.Armed && e.Sensor == "door" && e.Event == "open";
+    e.Armed &&
+    e.Sensor == "door" &&
+    (e.Event == "open" || e.Event == "closed");
 
     private static bool IsMotionTrigger(SecurityEvent e) =>
         e.Armed && e.Sensor == "motion" && e.Event == "detected";
