@@ -250,7 +250,7 @@ public partial class IncidentService
                 e.Zone == motionEvent.Zone &&
                 e.Armed &&
                 e.Sensor == "door" &&
-                e.Event == "open" &&
+                (e.Event == "open" || e.Event == "closed") &&
                 e.ReceivedAtUtc >= windowStart &&
                 e.ReceivedAtUtc <= motionEvent.ReceivedAtUtc)
             .OrderByDescending(e => e.ReceivedAtUtc)
