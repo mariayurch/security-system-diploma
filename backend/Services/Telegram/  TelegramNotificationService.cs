@@ -49,7 +49,6 @@ public class TelegramNotificationService : ITelegramNotificationService
         {
             chat_id = _options.ChatId,
             text,
-            parse_mode = "HTML"
         };
 
         try
