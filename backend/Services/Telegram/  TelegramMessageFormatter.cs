@@ -27,11 +27,16 @@ public class TelegramMessageFormatter
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine($"{GetIncidentEmoji(incident)} Оновлення інциденту");
+        var title = incident.Confidence == IncidentConfidence.Confirmed
+            ? "Підтверджений інцидент"
+            : "Оновлення інциденту";
+
+        sb.AppendLine($"{GetIncidentEmoji(incident)} {title}");
         sb.AppendLine($"ID: {incident.Id}");
         sb.AppendLine($"Тип: {incident.IncidentType}");
         sb.AppendLine($"Рівень: {incident.Confidence}");
         sb.AppendLine($"Зона: {incident.Zone}");
+        sb.AppendLine($"Час: {incident.StartedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
 
         if (!string.IsNullOrWhiteSpace(incident.Explanation))
         {

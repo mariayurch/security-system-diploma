@@ -6,6 +6,49 @@ namespace backend.Services;
 
 public partial class IncidentService
 {
+
+    private async Task ConfirmSuspectedIntrusionFromCorrelatedEventsAsync(
+    Incident suspectedIntrusion,
+    SecurityEvent perimeterEvent,
+    SecurityEvent motionEvent,
+    CancellationToken cancellationToken)
+    {
+        var linkedEventIds = suspectedIntrusion.IncidentEventLinks
+            .Select(link => link.SecurityEventId)
+            .ToHashSet();
+
+        if (!linkedEventIds.Contains(perimeterEvent.Id))
+        {
+            suspectedIntrusion.IncidentEventLinks.Add(new IncidentEventLink
+            {
+                SecurityEventId = perimeterEvent.Id
+            });
+        }
+
+        if (!linkedEventIds.Contains(motionEvent.Id))
+        {
+            suspectedIntrusion.IncidentEventLinks.Add(new IncidentEventLink
+            {
+                SecurityEventId = motionEvent.Id
+            });
+        }
+
+        suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
+        suspectedIntrusion.StartedAtUtc = Min(
+            suspectedIntrusion.StartedAtUtc,
+            Min(perimeterEvent.ReceivedAtUtc, motionEvent.ReceivedAtUtc));
+
+        suspectedIntrusion.Explanation =
+            $"Confirmed intrusion: perimeter trigger {perimeterEvent.SensorId} ({perimeterEvent.Sensor}/{perimeterEvent.Event}) and motion trigger {motionEvent.SensorId} were detected within 30 seconds while system was armed.";
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
+
+        _logger.LogInformation(
+            "Suspected intrusion upgraded to confirmed by correlated events -> zone={Zone}, incidentId={IncidentId}",
+            suspectedIntrusion.Zone,
+            suspectedIntrusion.Id);
+    }
     private async Task TryCreateOrConfirmIntrusionFromPerimeterAsync(SecurityEvent perimeterEvent, CancellationToken cancellationToken)
     {
         var windowStart = await GetCorrelationWindowStartAsync(
@@ -23,18 +66,6 @@ public partial class IncidentService
             return;
         }
 
-        var recentMotion = await FindRecentMotionAsync(perimeterEvent, windowStart, cancellationToken);
-        if (recentMotion is not null)
-        {
-            await CreateConfirmedIntrusionIncidentAsync(
-                perimeterEvent.Zone,
-                Min(perimeterEvent.ReceivedAtUtc, recentMotion.ReceivedAtUtc),
-                $"Confirmed intrusion: perimeter trigger {perimeterEvent.SensorId} ({perimeterEvent.Sensor}/{perimeterEvent.Event}) and motion trigger {recentMotion.SensorId} were detected within 30 seconds while system was armed.",
-                new[] { perimeterEvent, recentMotion },
-                cancellationToken);
-            return;
-        }
-
         var suspectedIntrusion = await FindOpenIncidentAsync(
             IncidentType.Intrusion,
             perimeterEvent.Zone,
@@ -44,9 +75,37 @@ public partial class IncidentService
             includeEventLinks: true,
             cancellationToken);
 
+        var recentMotion = await FindRecentMotionAsync(perimeterEvent, windowStart, cancellationToken);
+        if (recentMotion is not null)
+        {
+            if (suspectedIntrusion is not null)
+            {
+                await ConfirmSuspectedIntrusionFromCorrelatedEventsAsync(
+                    suspectedIntrusion,
+                    perimeterEvent,
+                    recentMotion,
+                    cancellationToken);
+            }
+            else
+            {
+                await CreateConfirmedIntrusionIncidentAsync(
+                    perimeterEvent.Zone,
+                    Min(perimeterEvent.ReceivedAtUtc, recentMotion.ReceivedAtUtc),
+                    $"Confirmed intrusion: perimeter trigger {perimeterEvent.SensorId} ({perimeterEvent.Sensor}/{perimeterEvent.Event}) and motion trigger {recentMotion.SensorId} were detected within 30 seconds while system was armed.",
+                    new[] { perimeterEvent, recentMotion },
+                    cancellationToken);
+            }
+
+            return;
+        }
+
         if (suspectedIntrusion is not null)
         {
-            await ConfirmSuspectedIntrusionFromPerimeterAsync(suspectedIntrusion, perimeterEvent, cancellationToken);
+            await ConfirmSuspectedIntrusionFromPerimeterAsync(
+                suspectedIntrusion,
+                perimeterEvent,
+                cancellationToken);
+
             return;
         }
 
@@ -179,8 +238,8 @@ public partial class IncidentService
 
         suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
         suspectedIntrusion.Explanation =
-            $"Confirmed intrusion: perimeter trigger from {perimeterEvent.SensorId} " +
-            $"({perimeterEvent.Sensor}/{perimeterEvent.Event}) while system was armed. ";
+        $"Confirmed intrusion: perimeter trigger from {perimeterEvent.SensorId} " +
+        $"({perimeterEvent.Sensor}/{perimeterEvent.Event}) while system was armed.";
 
         await _db.SaveChangesAsync(cancellationToken);
         await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
@@ -209,8 +268,8 @@ public partial class IncidentService
 
         suspectedIntrusion.Confidence = IncidentConfidence.Confirmed;
         suspectedIntrusion.Explanation =
-            $"Confirmed intrusion: perimeter trigger from {motionEvent.SensorId} " +
-            $"({motionEvent.Sensor}/{motionEvent.Event}) while system was armed. ";
+        $"Confirmed intrusion: motion trigger from {motionEvent.SensorId} " +
+        $"({motionEvent.Sensor}/{motionEvent.Event}) while system was armed.";
 
         await _db.SaveChangesAsync(cancellationToken);
         await _telegram.SendIncidentUpdatedAsync(suspectedIntrusion, cancellationToken);
