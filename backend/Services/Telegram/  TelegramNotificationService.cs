@@ -26,20 +26,20 @@ public class TelegramNotificationService : ITelegramNotificationService
     public async Task SendIncidentCreatedAsync(Incident incident, CancellationToken cancellationToken = default)
     {
         var text = _formatter.FormatIncidentCreated(incident);
-        await SendMessageAsync(text, cancellationToken);
+        await SendAsync(text, "incident_created", cancellationToken);
     }
 
     public async Task SendIncidentUpdatedAsync(Incident incident, CancellationToken cancellationToken = default)
     {
         var text = _formatter.FormatIncidentUpdated(incident);
-        await SendMessageAsync(text, cancellationToken);
+        await SendAsync(text, "incident_updated", cancellationToken);
     }
 
-    private async Task SendMessageAsync(string text, CancellationToken cancellationToken)
+    private async Task SendAsync(string text, string messageType, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.BotToken) || string.IsNullOrWhiteSpace(_options.ChatId))
         {
-            _logger.LogWarning("Telegram settings are missing. Notification skipped.");
+            _logger.LogWarning("Telegram BotToken or ChatId is not configured. Skipping notification.");
             return;
         }
 
@@ -48,22 +48,40 @@ public class TelegramNotificationService : ITelegramNotificationService
         var payload = new
         {
             chat_id = _options.ChatId,
-            text
+            text,
+            parse_mode = "HTML"
         };
 
         try
         {
             var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
 
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
             {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogError("Telegram send failed. Status={StatusCode}, Body={Body}", response.StatusCode, body);
+                _logger.LogInformation(
+                    "Telegram notification sent successfully. Type={MessageType}, ChatId={ChatId}",
+                    messageType,
+                    _options.ChatId);
+
+                return;
             }
+
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            _logger.LogError(
+                "Telegram send failed. Type={MessageType}, StatusCode={StatusCode}, ChatId={ChatId}, ResponseBody={ResponseBody}",
+                messageType,
+                (int)response.StatusCode,
+                _options.ChatId,
+                responseBody);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Telegram notification failed.");
+            _logger.LogError(
+                ex,
+                "Error while sending Telegram notification. Type={MessageType}, ChatId={ChatId}",
+                messageType,
+                _options.ChatId);
         }
     }
 }
