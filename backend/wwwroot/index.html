@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Incident Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      background: #f6f7fb;
+      color: #222;
+    }
+
+    h1 {
+      margin-bottom: 16px;
+    }
+
+    .toolbar {
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      background: white;
+      cursor: pointer;
+      border-radius: 8px;
+      margin-right: 8px;
+    }
+
+    button:hover {
+      background: #f0f0f0;
+    }
+
+    .incident-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .incident-card {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .incident-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .incident-row {
+      margin: 4px 0;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-left: 8px;
+    }
+
+    .status-open {
+      background: #fff3cd;
+      color: #8a6d3b;
+    }
+
+    .status-acknowledged {
+      background: #d9edf7;
+      color: #31708f;
+    }
+
+    .status-closed {
+      background: #dff0d8;
+      color: #3c763d;
+    }
+
+    .actions {
+      margin-top: 12px;
+    }
+
+    .explanation {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f8f8f8;
+      border-radius: 8px;
+      white-space: pre-wrap;
+    }
+
+    .muted {
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Incident Dashboard</h1>
+
+  <div class="toolbar">
+    <button onclick="loadIncidents()">Оновити</button>
+  </div>
+
+  <div id="incident-list" class="incident-list"></div>
+
+  <script>
+    async function loadIncidents() {
+      const container = document.getElementById("incident-list");
+      container.innerHTML = "<div>Завантаження...</div>";
+
+      try {
+        const res = await fetch("/api/incidents?limit=50");
+        if (!res.ok) {
+          throw new Error("Не вдалося завантажити інциденти");
+        }
+
+        const incidents = await res.json();
+
+        if (!incidents.length) {
+          container.innerHTML = "<div>Інцидентів поки немає.</div>";
+          return;
+        }
+
+        container.innerHTML = incidents.map(renderIncidentCard).join("");
+      } catch (err) {
+        container.innerHTML = `<div>Помилка: ${err.message}</div>`;
+      }
+    }
+
+    function renderIncidentCard(incident) {
+      const statusText = getStatusText(incident.status);
+      const statusClass = getStatusClass(incident.status);
+
+      const startedAt = incident.startedAtUtc
+        ? new Date(incident.startedAtUtc).toLocaleString()
+        : "-";
+
+      const closedAt = incident.closedAtUtc
+        ? new Date(incident.closedAtUtc).toLocaleString()
+        : null;
+
+      return `
+        <div class="incident-card">
+          <div class="incident-title">
+            Інцидент #${incident.id}
+            <span class="badge ${statusClass}">${statusText}</span>
+          </div>
+
+          <div class="incident-row"><b>Тип:</b> ${incident.incidentType}</div>
+          <div class="incident-row"><b>Рівень:</b> ${incident.confidence}</div>
+          <div class="incident-row"><b>Зона:</b> ${incident.zone ?? "-"}</div>
+          <div class="incident-row"><b>Початок:</b> ${startedAt}</div>
+          ${closedAt ? `<div class="incident-row"><b>Закрито:</b> ${closedAt}</div>` : ""}
+          <div class="incident-row"><b>Статус:</b> ${statusText}</div>
+
+          <div class="explanation">
+            <b>Пояснення:</b><br />
+            ${incident.explanation ?? "-"}
+          </div>
+
+          <div class="actions">
+            ${renderActions(incident)}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderActions(incident) {
+      const status = incident.status;
+
+      if (status === 1 || status === "Open") {
+        return `
+          <button onclick="ackIncident(${incident.id})">Acknowledge</button>
+          <button onclick="closeIncident(${incident.id})">Close</button>
+        `;
+      }
+
+      if (status === 3 || status === "Acknowledged") {
+        return `
+          <button onclick="closeIncident(${incident.id})">Close</button>
+        `;
+      }
+
+      return `<span class="muted">Інцидент закритий</span>`;
+    }
+
+    function getStatusText(status) {
+      if (status === 1 || status === "Open") return "Open";
+      if (status === 2 || status === "Closed") return "Closed";
+      if (status === 3 || status === "Acknowledged") return "Acknowledged";
+      return status;
+    }
+
+    function getStatusClass(status) {
+      if (status === 1 || status === "Open") return "status-open";
+      if (status === 2 || status === "Closed") return "status-closed";
+      if (status === 3 || status === "Acknowledged") return "status-acknowledged";
+      return "";
+    }
+
+    async function ackIncident(id) {
+      const res = await fetch(`/api/incidents/${id}/ack`, {
+        method: "PATCH"
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        alert("Не вдалося підтвердити інцидент: " + text);
+        return;
+      }
+
+      await loadIncidents();
+    }
+
+    async function closeIncident(id) {
+      const res = await fetch(`/api/incidents/${id}/close`, {
+        method: "PATCH"
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        alert("Не вдалося закрити інцидент: " + text);
+        return;
+      }
+
+      await loadIncidents();
+    }
+
+    loadIncidents();
+  </script>
+</body>
+</html>
