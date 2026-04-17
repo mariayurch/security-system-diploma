@@ -1,8 +1,9 @@
 using backend.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using backend.Services;
+using backend.Services.Telegram;
 using backend.Dtos;
+using backend.Models.Enums;
 
 namespace backend.Controllers;
 
@@ -11,12 +12,12 @@ namespace backend.Controllers;
 public class IncidentsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IncidentService _incidentService;
+    private readonly ITelegramNotificationService _telegram;
 
-    public IncidentsController(AppDbContext db, IncidentService incidentService)
+    public IncidentsController(AppDbContext db, ITelegramNotificationService telegram)
     {
         _db = db;
-        _incidentService = incidentService;
+        _telegram = telegram;
     }
 
     [HttpGet]
@@ -44,28 +45,43 @@ public class IncidentsController : ControllerBase
     [HttpPatch("{id:int}/ack")]
     public async Task<IActionResult> AcknowledgeIncident(int id, CancellationToken cancellationToken)
     {
-        try
-        {
-            var incident = await _incidentService.AcknowledgeIncidentAsync(id, cancellationToken);
+        var incident = await _db.Incidents
+            .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
-            if (incident is null)
-                return NotFound();
+        if (incident is null)
+            return NotFound();
 
-            return Ok(incident);
-        }
-        catch (InvalidOperationException ex)
+        if (incident.Status == IncidentStatus.Closed)
+            return BadRequest(new { message = "Closed incident cannot be acknowledged." });
+
+        if (incident.Status != IncidentStatus.Acknowledged)
         {
-            return BadRequest(new { message = ex.Message });
+            incident.Status = IncidentStatus.Acknowledged;
+
+            await _db.SaveChangesAsync(cancellationToken);
+            await _telegram.SendIncidentUpdatedAsync(incident, cancellationToken);
         }
+
+        return Ok(incident);
     }
 
     [HttpPatch("{id:int}/close")]
     public async Task<IActionResult> CloseIncident(int id, CancellationToken cancellationToken)
     {
-        var incident = await _incidentService.CloseIncidentAsync(id, cancellationToken);
+        var incident = await _db.Incidents
+            .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
         if (incident is null)
             return NotFound();
+
+        if (incident.Status != IncidentStatus.Closed)
+        {
+            incident.Status = IncidentStatus.Closed;
+            incident.ClosedAtUtc = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(cancellationToken);
+            await _telegram.SendIncidentUpdatedAsync(incident, cancellationToken);
+        }
 
         return Ok(incident);
     }
