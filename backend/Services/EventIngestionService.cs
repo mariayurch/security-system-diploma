@@ -126,6 +126,8 @@ public class EventIngestionService
                 entity.Event,
                 entity.EventId);
 
+            await _incidentService.ProcessEventAsync(entity, cancellationToken);
+
             return entity;
         }
         catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
