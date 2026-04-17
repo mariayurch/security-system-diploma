@@ -2,6 +2,7 @@ using backend.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using backend.Services;
+using backend.Dtos;
 
 namespace backend.Controllers;
 
@@ -22,10 +23,19 @@ public class IncidentsController : ControllerBase
     public async Task<IActionResult> GetIncidents([FromQuery] int limit = 20)
     {
         var incidents = await _db.Incidents
-            .Include(i => i.IncidentEventLinks)
-            .ThenInclude(link => link.SecurityEvent)
             .OrderByDescending(i => i.Id)
             .Take(limit)
+            .Select(i => new IncidentListItemDto
+            {
+                Id = i.Id,
+                IncidentType = i.IncidentType.ToString(),
+                Status = i.Status.ToString(),
+                Confidence = i.Confidence.ToString(),
+                Zone = i.Zone,
+                StartedAtUtc = i.StartedAtUtc,
+                ClosedAtUtc = i.ClosedAtUtc,
+                Explanation = i.Explanation
+            })
             .ToListAsync();
 
         return Ok(incidents);
