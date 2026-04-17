@@ -146,6 +146,61 @@ public partial class IncidentService
                 cancellationToken);
     }
 
+    public async Task<Incident?> AcknowledgeIncidentAsync(int incidentId, CancellationToken cancellationToken)
+    {
+        var incident = await _db.Incidents
+            .FirstOrDefaultAsync(i => i.Id == incidentId, cancellationToken);
+
+        if (incident is null)
+            return null;
+
+        if (incident.Status == IncidentStatus.Closed)
+        {
+            throw new InvalidOperationException("Closed incident cannot be acknowledged.");
+        }
+
+        if (incident.Status == IncidentStatus.Acknowledged)
+            return incident;
+
+        incident.Status = IncidentStatus.Acknowledged;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Incident acknowledged -> incidentId={IncidentId}, type={IncidentType}, zone={Zone}",
+            incident.Id,
+            incident.IncidentType,
+            incident.Zone);
+
+        return incident;
+    }
+
+    public async Task<Incident?> CloseIncidentAsync(int incidentId, CancellationToken cancellationToken)
+    {
+        var incident = await _db.Incidents
+            .FirstOrDefaultAsync(i => i.Id == incidentId, cancellationToken);
+
+        if (incident is null)
+            return null;
+
+        if (incident.Status == IncidentStatus.Closed)
+            return incident;
+
+        incident.Status = IncidentStatus.Closed;
+        incident.ClosedAtUtc = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Incident closed -> incidentId={IncidentId}, type={IncidentType}, zone={Zone}, closedAtUtc={ClosedAtUtc}",
+            incident.Id,
+            incident.IncidentType,
+            incident.Zone,
+            incident.ClosedAtUtc);
+
+        return incident;
+    }
+
     private static DateTime Min(DateTime left, DateTime right) => left < right ? left : right;
     private static DateTime Max(DateTime left, DateTime right) => left > right ? left : right;
 }
