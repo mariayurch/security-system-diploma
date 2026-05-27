@@ -37,14 +37,44 @@ public class MqttListenerService : BackgroundService
                 _logger.LogInformation("MQTT message received from topic: {Topic}", sourceTopic);
                 _logger.LogInformation("MQTT raw payload: {Payload}", payload);
 
-                var dto = JsonSerializer.Deserialize<EspEventDto>(payload, new JsonSerializerOptions
+                if (string.IsNullOrWhiteSpace(payload))
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    _logger.LogWarning("Empty MQTT payload ignored");
+                    return;
+                }
+
+                var trimmedPayload = payload.Trim();
+
+                if (!trimmedPayload.StartsWith("{"))
+                {
+                    _logger.LogWarning(
+                        "Non-JSON MQTT payload ignored from topic {Topic}: {Payload}",
+                        sourceTopic,
+                        payload);
+                    return;
+                }
+
+                EspEventDto? dto;
+                try
+                {
+                    dto = JsonSerializer.Deserialize<EspEventDto>(trimmedPayload, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Invalid JSON payload ignored from topic {Topic}: {Payload}",
+                        sourceTopic,
+                        payload);
+                    return;
+                }
 
                 if (dto is null)
                 {
-                    _logger.LogWarning("Failed to deserialize payload");
+                    _logger.LogWarning("Failed to deserialize payload from topic {Topic}", sourceTopic);
                     return;
                 }
 
