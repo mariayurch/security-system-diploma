@@ -1,5 +1,4 @@
 #pragma once
-
 #include "secrets.h"
 
 // ------------------------
@@ -24,8 +23,8 @@ constexpr const char* MQTT_SERVER = "broker.hivemq.com";
 constexpr int MQTT_PORT = 1883;
 constexpr const char* MQTT_CLIENT_ID = "esp32_security_demo_01";
 
-constexpr const char* EVENTS_TOPIC = "home/security/events";
-constexpr const char* STATUS_TOPIC = "home/security/status";
+constexpr const char* EVENTS_TOPIC = "home/security-diploma/events";
+constexpr const char* STATUS_TOPIC = "home/security-diploma/status";
 
 // ------------------------
 // Device metadata
